@@ -1,6 +1,6 @@
 # ADR — Registro de Decisões Arquiteturais: Synapse
 
-*Versão 1.5 · 26/08/2026*
+*Versão 1.6 · 26/08/2026*
 *Formato: adaptado do template de Michael Nygard, com um campo extra obrigatório de conformidade com a restrição de custo zero*
 *Este arquivo é o **registro vivo** de decisões arquiteturais do Synapse a partir de agora. As 8 decisões que já estavam listadas na seção 9 de `SAD - Synapse.md` foram trazidas para cá; o SAD passa a apontar para este arquivo em vez de manter uma cópia própria (evita duas fontes divergentes).*
 
@@ -151,6 +151,24 @@ Essa regra vale para toda decisão passada (auditadas abaixo) e futura (checklis
 - **Alternativas consideradas:** `Microsoft.Extensions.Logging` + provider de arquivo próprio — descartado por reinventar rotação/retenção que o Serilog já resolve maduramente. **NLog** — concorrente direto do Serilog, também gratuito (BSD-3-Clause) e com rotação de arquivo nativa; descartado só por preferência de ecossistema (Serilog tem integração mais direta com `IHostBuilder`/`Microsoft.Extensions.Hosting` via `UseSerilog()`/`AddSerilog()`), não por custo — registrado como alternativa válida caso o Serilog apresente algum problema no futuro.
 - **Conformidade com custo zero:** ✅ Todos os pacotes Serilog usados (`Serilog.Extensions.Hosting`, `Serilog.Settings.Configuration`, `Serilog.Sinks.Console`, `Serilog.Sinks.File`, `Serilog.Enrichers.Environment`) são Apache 2.0, gratuitos, sem conta, sem cartão, sem cota de uso.
 
+## ADR-015 — DiffPlex para o algoritmo de diff do merge de 3 vias
+
+- **Status:** Aceita
+- **Contexto:** resolve o **TECH-06** do Backlog (spike técnico, Must, bloqueante antes de US-CONFLICT.2), deixado como pergunta em aberto no PRD (seção 11): "biblioteca própria em C# ou via `diff-match-patch` portado/wrapado?". `IConflictResolver.TryMergeBody` (`API - Synapse.md` seção 2.3) precisa localizar, para o corpo de uma nota, quais trechos mudaram da base para local e da base para remoto, para decidir se os hunks se sobrepõem (RF-CONFLICT.2) ou não (RF-CONFLICT.4).
+- **Decisão:** usar **DiffPlex** (`DiffPlex` no NuGet) para o diff de linhas que alimenta o merge de 3 vias, em vez de portar `diff-match-patch` ou escrever um algoritmo de diff próprio.
+- **Consequências:** mais uma dependência NuGet em `Synapse.Conflict`; em troca, evita reimplementar um algoritmo de diff correto e testado do zero no componente com maior risco de bug silencioso do sistema (`Plano de Testes - Synapse.md`, seção 2) — coerente com o padrão já adotado no projeto de preferir bibliotecas maduras a reinvenção (mesmo raciocínio de ADR-002/ADR-012).
+- **Alternativas consideradas:** algoritmo de Myers escrito à mão — descartado por risco técnico desproporcional (reimplementar e validar um algoritmo de diff correto do zero, no componente de maior risco do sistema, sem ganho real sobre uma biblioteca madura). Porte/wrapper de `diff-match-patch` (Google) — descartado porque os ports disponíveis para .NET são pouco mantidos comparados ao DiffPlex, que já é o padrão de fato do ecossistema .NET para esse problema.
+- **Conformidade com custo zero:** ✅ DiffPlex é MIT, gratuito, gerenciado (sem dependência nativa), sem conta, sem cartão, sem cota de uso.
+
+## ADR-016 — YamlDotNet para parsing de YAML (frontmatter e regras)
+
+- **Status:** Aceita
+- **Contexto:** `IConflictResolver.TryMergeFrontmatter` (RF-CONFLICT.3) precisa parsear o bloco de frontmatter YAML de cada versão (base/local/remoto) para mesclar por chave, e `IRuleEngine.LoadRulesAsync` (RF-RULES.1) precisa parsear `.synapse/regras.yaml`. Nenhum ADR anterior havia decidido uma biblioteca de parsing YAML para o .NET.
+- **Decisão:** usar **YamlDotNet** (`YamlDotNet` no NuGet) como parser YAML, compartilhado entre `Synapse.Conflict` e (futuramente) `Synapse.Rules`.
+- **Consequências:** mais uma dependência NuGet; em troca, evita escrever um parser YAML próprio (YAML tem gramática não trivial — âncoras, blocos multi-linha, tipos implícitos) para um formato que já é consumido por duas partes distintas do sistema.
+- **Alternativas consideradas:** nenhuma alternativa madura de parsing YAML completo foi encontrada no ecossistema .NET com adoção comparável — YamlDotNet é o parser de fato usado por projetos como o próprio SDK do Azure. Não houve, portanto, uma segunda opção genuína a descartar.
+- **Conformidade com custo zero:** ✅ YamlDotNet é MIT, gratuito, gerenciado, sem conta, sem cartão, sem cota de uso.
+
 ---
 
 ## Auditoria consolidada
@@ -170,6 +188,8 @@ Essa regra vale para toda decisão passada (auditadas abaixo) e futura (checklis
 | ADR-012 (Shouldly) | Sim (biblioteca de teste) | ✅ | ✅ | ✅ (FluentAssertions v8 teria falhado aqui) |
 | ADR-013 (instalador `sc.exe`) | Sim (recursos do SO: `dotnet publish`, `sc.exe`, PowerShell) | ✅ | ✅ | ✅ |
 | ADR-014 (Serilog) | Sim (biblioteca de logging) | ✅ | ✅ | ✅ |
+| ADR-015 (DiffPlex) | Sim (biblioteca de diff) | ✅ | ✅ | ✅ |
+| ADR-016 (YamlDotNet) | Sim (biblioteca de parsing YAML) | ✅ | ✅ | ✅ |
 
 Nenhuma não-conformidade encontrada na auditoria retroativa.
 

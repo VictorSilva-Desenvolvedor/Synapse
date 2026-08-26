@@ -149,7 +149,7 @@ Itens que surgem da necessidade de engenharia, não de um requisito de produto �
 | TECH-03 | Rotina de recriação do índice SQLite em caso de corrupção | Ver SRS, seção 3.8 — evita que um índice corrompido derrube o serviço permanentemente | Should | M | V1 |
 | TECH-04 | Empacotamento/instalador do Windows Service | Decisão em aberto no PRD (seção 11); precisa ser resolvida antes do fim do MVP | Must | M | MVP |
 | TECH-05 | Spike técnico: comportamento do escopo `drive.file` com pasta pré-existente populada manualmente | Risco identificado no PRD (seção 10); validar antes de fechar US-AUTH.2 | Must | PP | MVP (antes de US-AUTH.2) |
-| TECH-06 | Spike técnico: escolha da biblioteca/algoritmo de diff para o merge de 3 vias | Pergunta em aberto no PRD (seção 11) | Must | PP | V1 (antes de US-CONFLICT.2) |
+| TECH-06 | ~~Spike técnico: escolha da biblioteca/algoritmo de diff para o merge de 3 vias~~ — **Resolvido, ver ADR-015 (DiffPlex) e ADR-016 (YamlDotNet)** | Pergunta em aberto no PRD (seção 11) | Must | PP | V1 (antes de US-CONFLICT.2) |
 
 ---
 

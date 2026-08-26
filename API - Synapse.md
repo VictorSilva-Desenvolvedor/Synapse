@@ -1,6 +1,6 @@
 # Especificação de API — Synapse
 
-*Versão 1.0 · 26/08/2026*
+*Versão 1.1 · 26/08/2026*
 *Baseado em: `SAD - Synapse.md` (v1.0, seção 3 — Visão Lógica) e `SRS - Synapse.md` (v1.0, seção 3.2.3)*
 
 ---
@@ -200,6 +200,24 @@ public interface IVaultWatcher : IDisposable
 public sealed record VaultChangeEvent(string RelativePath, SyncEventType EventType);
 ```
 
+### 2.6 `IFileSystem`
+
+Abstrai o sistema de arquivos local — porta nova em relação à v1.0 desta API, pelo mesmo motivo da seção 2.5: sem ela, `SyncQueueProcessor` (que lê/escreve o conteúdo das notas, calcula hash e cacheia o conteúdo-base do merge de 3 vias) dependeria diretamente de `System.IO`, dificultando testar sem disco real (`Plano de Testes - Synapse.md` seção 4 já previa "`IFileSystem` em memória" para os testes de sistema simulados, mas a porta em si nunca tinha sido formalizada em código).
+
+```csharp
+namespace Synapse.Core.Ports;
+
+public interface IFileSystem
+{
+    Task<bool> ExistsAsync(string path, CancellationToken ct);
+    Task<string> ReadAllTextAsync(string path, CancellationToken ct);
+    Task WriteAllTextAsync(string path, string content, CancellationToken ct);
+    Task DeleteAsync(string path, CancellationToken ct);
+}
+```
+
+Implementação da v1: `LocalFileSystem` (`Synapse.Sync`, sobre `System.IO`). Dublê de teste: `InMemoryFileSystem` (`Synapse.Tests`).
+
 ---
 
 ## 3. API de IPC Local — Bandeja ↔ Serviço
@@ -281,6 +299,7 @@ Não repetido aqui: parâmetros de cota, campos restritos via `fields`, e polít
 | `IConflictResolver` | RF-CONFLICT.1–4 | SRS seção 3.7 (máquina de estados) |
 | `IRuleEngine` | RF-RULES.1–5 | Backlog EP-04 |
 | `IVaultWatcher` | RF-SYNC.1 | SRS seção 3.8 (limitação do FileSystemWatcher) |
+| `IFileSystem` | RF-SYNC.3, RF-CONFLICT.1–2 | Plano de Testes seção 4 ("IFileSystem em memória") — lacuna fechada por esta revisão |
 | IPC Bandeja↔Serviço | RF-UX.1, RF-UX.2, RF-UX.4 | Nenhum — lacuna fechada por este documento |
 
 ---

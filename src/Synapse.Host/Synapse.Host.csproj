@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-Synapse.Host-6a0388c8-6ba2-4347-a73a-85b9c8228a7a</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Synapse.Core\Synapse.Core.csproj" />
+    <ProjectReference Include="..\Synapse.Sync\Synapse.Sync.csproj" />
+    <ProjectReference Include="..\Synapse.Conflict\Synapse.Conflict.csproj" />
+    <ProjectReference Include="..\Synapse.Rules\Synapse.Rules.csproj" />
+    <ProjectReference Include="..\Synapse.Data\Synapse.Data.csproj" />
+  </ItemGroup>
+</Project>

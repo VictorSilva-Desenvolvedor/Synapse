@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    # ubuntu-latest custa 1x minuto (windows-latest custa 2x) — repositorio e privado,
+    # com cota mensal limitada (ADR-011). Nada em Synapse.Host ainda usa API especifica
+    # de Windows (DPAPI/Windows Service/bandeja, RNF-7); migrar para windows-latest
+    # quando esse codigo chegar.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restaurar dependencias
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Testes
+        run: dotnet test --no-build --configuration Release

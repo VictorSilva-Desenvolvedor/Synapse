@@ -6,6 +6,10 @@
 # dotenv files
 .env
 
+# Logs do Synapse.Host (Serilog, RF-UX.4)
+logs/
+**/logs/
+
 # User-specific files
 *.rsuser
 *.suo

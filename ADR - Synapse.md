@@ -1,6 +1,6 @@
 # ADR — Registro de Decisões Arquiteturais: Synapse
 
-*Versão 1.4 · 26/08/2026*
+*Versão 1.5 · 26/08/2026*
 *Formato: adaptado do template de Michael Nygard, com um campo extra obrigatório de conformidade com a restrição de custo zero*
 *Este arquivo é o **registro vivo** de decisões arquiteturais do Synapse a partir de agora. As 8 decisões que já estavam listadas na seção 9 de `SAD - Synapse.md` foram trazidas para cá; o SAD passa a apontar para este arquivo em vez de manter uma cópia própria (evita duas fontes divergentes).*
 
@@ -142,6 +142,15 @@ Essa regra vale para toda decisão passada (auditadas abaixo) e futura (checklis
 - **Alternativas consideradas:** instalador MSI via WiX Toolset — tecnicamente superior em polimento (GUI, desinstalação padrão do Windows, versionamento de upgrade), mas adiciona um toolchain de build inteiro (compilação de `.wxs`, licenciamento de UI) para um público que já opera confortavelmente via linha de comando; descartado por desproporção de complexidade (KISS, mesmo raciocínio de ADR-005/ADR-007/ADR-010), não por custo — WiX é gratuito e open source, permanece candidato natural se a v2+ mirar um público não técnico (já sinalizado como fora de escopo). `sc create` totalmente manual (sem script) — descartado por não ser repetível nem versionável; o script PowerShell resolve isso sem o peso de um instalador completo.
 - **Conformidade com custo zero:** ✅ `dotnet publish` (SDK já usado no projeto), `sc.exe` e PowerShell são nativos do Windows — nenhuma ferramenta nova, sem conta, sem cartão. A alternativa descartada (WiX) também seria gratuita — a decisão aqui não foi motivada por custo, mas por simplicidade proporcional ao público-alvo da v1.
 
+## ADR-014 — Serilog para logging estruturado
+
+- **Status:** Aceita
+- **Contexto:** RF-UX.4/RNF-8 exigem logs estruturados, com nível configurável e rotacionados (não crescer indefinidamente), acessíveis para diagnóstico local sem precisar reproduzir o problema (US-00.3 do Backlog, EP-00). `Microsoft.Extensions.Logging` sozinho (built-in) não tem um provider de arquivo com rotação pronto para uso — precisaria escrever um do zero.
+- **Decisão:** usar **Serilog** (`Serilog.Extensions.Hosting`, `Serilog.Settings.Configuration`, `Serilog.Sinks.Console`, `Serilog.Sinks.File`, `Serilog.Enrichers.Environment`) como implementação concreta de log em `Synapse.Host` — sink de arquivo com `rollingInterval: Day`, `retainedFileCountLimit: 31`, `rollOnFileSizeLimit` em 10MB, mais sink de console para execução interativa/debug. Nível mínimo configurável via `appsettings.json` (seção `Serilog`), sem precisar recompilar. O resto do código (`Synapse.Core`/`Sync`/`Conflict`/`Rules`/`Data`) continua dependendo só da abstração `ILogger<T>` do `Microsoft.Extensions.Logging` — Serilog é um detalhe de infraestrutura isolado em `Synapse.Host` (composição/DI), coerente com a arquitetura hexagonal (ADR-001).
+- **Consequências:** mais 5 pacotes NuGet (todos do próprio ecossistema Serilog, mantidos pelo mesmo projeto) só em `Synapse.Host`; em troca, ganha rotação de arquivo pronta, enriquecimento estruturado (`{Timestamp}`, `{Level}`, `{SourceContext}`, propriedades customizadas) e configuração via `appsettings.json` sem código adicional — exatamente o que RF-UX.4 pede.
+- **Alternativas consideradas:** `Microsoft.Extensions.Logging` + provider de arquivo próprio — descartado por reinventar rotação/retenção que o Serilog já resolve maduramente. **NLog** — concorrente direto do Serilog, também gratuito (BSD-3-Clause) e com rotação de arquivo nativa; descartado só por preferência de ecossistema (Serilog tem integração mais direta com `IHostBuilder`/`Microsoft.Extensions.Hosting` via `UseSerilog()`/`AddSerilog()`), não por custo — registrado como alternativa válida caso o Serilog apresente algum problema no futuro.
+- **Conformidade com custo zero:** ✅ Todos os pacotes Serilog usados (`Serilog.Extensions.Hosting`, `Serilog.Settings.Configuration`, `Serilog.Sinks.Console`, `Serilog.Sinks.File`, `Serilog.Enrichers.Environment`) são Apache 2.0, gratuitos, sem conta, sem cartão, sem cota de uso.
+
 ---
 
 ## Auditoria consolidada
@@ -160,6 +169,7 @@ Essa regra vale para toda decisão passada (auditadas abaixo) e futura (checklis
 | ADR-011 (GitHub Actions) | Sim (serviço de CI) | ✅ | ✅ (cota, não assinatura) | ✅ |
 | ADR-012 (Shouldly) | Sim (biblioteca de teste) | ✅ | ✅ | ✅ (FluentAssertions v8 teria falhado aqui) |
 | ADR-013 (instalador `sc.exe`) | Sim (recursos do SO: `dotnet publish`, `sc.exe`, PowerShell) | ✅ | ✅ | ✅ |
+| ADR-014 (Serilog) | Sim (biblioteca de logging) | ✅ | ✅ | ✅ |
 
 Nenhuma não-conformidade encontrada na auditoria retroativa.
 

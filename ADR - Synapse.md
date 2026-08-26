@@ -1,6 +1,6 @@
 # ADR — Registro de Decisões Arquiteturais: Synapse
 
-*Versão 1.3 · 26/08/2026*
+*Versão 1.4 · 26/08/2026*
 *Formato: adaptado do template de Michael Nygard, com um campo extra obrigatório de conformidade com a restrição de custo zero*
 *Este arquivo é o **registro vivo** de decisões arquiteturais do Synapse a partir de agora. As 8 decisões que já estavam listadas na seção 9 de `SAD - Synapse.md` foram trazidas para cá; o SAD passa a apontar para este arquivo em vez de manter uma cópia própria (evita duas fontes divergentes).*
 
@@ -133,6 +133,15 @@ Essa regra vale para toda decisão passada (auditadas abaixo) e futura (checklis
 - **Alternativas consideradas:** FluentAssertions v8+ — rejeitada, paga para uso comercial. FluentAssertions v7 fixada (ainda Apache 2.0) — rejeitada por ficar presa a uma versão sem atualizações de segurança/manutenção no longo prazo. **AwesomeAssertions** (fork Apache 2.0 do FluentAssertions v7, API idêntica) — alternativa válida e também gratuita, preterida só porque Shouldly é um projeto MIT estabelecido por conta própria, não uma resposta reativa a uma mudança de licença de terceiro (menor risco de repetir o mesmo problema no futuro).
 - **Conformidade com custo zero:** ✅ Shouldly é MIT, gratuita, sem cota nem cartão. **Esta ADR existe justamente porque o checklist do ADR-009 pegou uma dependência que quase entraria sem passar por ele** — é o registro de o processo funcionando como pretendido, não só uma decisão a mais.
 
+## ADR-013 — Publicação self-contained + script `sc.exe` como instalador do Windows Service
+
+- **Status:** Aceita
+- **Contexto:** o PRD (seção 11, "Perguntas em Aberto") deixou em aberto o mecanismo de instalação do Windows Service — instalador MSI, `sc create` manual, ou publicação self-contained — marcado como TECH-04 no Backlog, "Must, precisa ser resolvida antes do fim do MVP". O público-alvo da v1 é explicitamente técnico (SRS 2.3: "usuário técnico único... confortável instalando e operando um serviço de background"), e ADR-006 já aceitou que a instalação exige privilégio administrativo.
+- **Decisão:** publicar `Synapse.Host` como executável **self-contained de arquivo único** (`dotnet publish -r win-x64 --self-contained true -p:PublishSingleFile=true`) e registrar/remover o serviço através de um script PowerShell (`install.ps1`/`uninstall.ps1`) que chama `sc.exe create`/`sc.exe delete` — sem instalador MSI (sem WiX Toolset ou equivalente) na v1.
+- **Consequências:** nenhuma dependência de runtime .NET precisa estar pré-instalada na máquina de destino (self-contained resolve isso); o script fica pequeno, legível e auditável por um usuário técnico antes de rodar como administrador — coerente com o público-alvo; em troca, não há assistente gráfico de instalação nem entrada automática em "Programas e Recursos" do Windows (typicamente entregue por um MSI) — aceitável para a v1, já que uma instalação amigável para usuário não técnico já está fora de escopo (Visão de Produto, seção 7 — Riscos; PRD, seção 3).
+- **Alternativas consideradas:** instalador MSI via WiX Toolset — tecnicamente superior em polimento (GUI, desinstalação padrão do Windows, versionamento de upgrade), mas adiciona um toolchain de build inteiro (compilação de `.wxs`, licenciamento de UI) para um público que já opera confortavelmente via linha de comando; descartado por desproporção de complexidade (KISS, mesmo raciocínio de ADR-005/ADR-007/ADR-010), não por custo — WiX é gratuito e open source, permanece candidato natural se a v2+ mirar um público não técnico (já sinalizado como fora de escopo). `sc create` totalmente manual (sem script) — descartado por não ser repetível nem versionável; o script PowerShell resolve isso sem o peso de um instalador completo.
+- **Conformidade com custo zero:** ✅ `dotnet publish` (SDK já usado no projeto), `sc.exe` e PowerShell são nativos do Windows — nenhuma ferramenta nova, sem conta, sem cartão. A alternativa descartada (WiX) também seria gratuita — a decisão aqui não foi motivada por custo, mas por simplicidade proporcional ao público-alvo da v1.
+
 ---
 
 ## Auditoria consolidada
@@ -150,6 +159,7 @@ Essa regra vale para toda decisão passada (auditadas abaixo) e futura (checklis
 | ADR-010 (Named Pipe) | Sim (runtime .NET) | ✅ | ✅ | ✅ |
 | ADR-011 (GitHub Actions) | Sim (serviço de CI) | ✅ | ✅ (cota, não assinatura) | ✅ |
 | ADR-012 (Shouldly) | Sim (biblioteca de teste) | ✅ | ✅ | ✅ (FluentAssertions v8 teria falhado aqui) |
+| ADR-013 (instalador `sc.exe`) | Sim (recursos do SO: `dotnet publish`, `sc.exe`, PowerShell) | ✅ | ✅ | ✅ |
 
 Nenhuma não-conformidade encontrada na auditoria retroativa.
 

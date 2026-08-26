@@ -10,6 +10,9 @@
 logs/
 **/logs/
 
+# Saida do scripts/install.ps1 (publicacao self-contained, ADR-013)
+/publish/
+
 # User-specific files
 *.rsuser
 *.suo

@@ -504,7 +504,7 @@ public sealed class RemoteCommandExecutor
             var answerMessage = answer.Answer;
             if (answer.Sources != null && answer.Sources.Count > 0)
             {
-                var sourcesFormatted = string.Join(", ", answer.Sources.Select(s => $"[[{Path.GetFileNameWithoutExtension(s)}]]"));
+                var sourcesFormatted = string.Join(", ", answer.Sources.Select(s => string.IsNullOrWhiteSpace(s.Title) ? $"[[{Path.GetFileNameWithoutExtension(s.RelativePath)}]]" : $"[[{s.Title}]]"));
                 answerMessage += $"\n\nFontes: {sourcesFormatted}";
             }
 

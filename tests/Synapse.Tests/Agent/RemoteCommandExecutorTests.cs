@@ -682,7 +682,10 @@ public class RemoteCommandExecutorTests : IDisposable
             .Returns(new RagAnswer(
                 "Como funciona a arquitetura?",
                 "O Synapse utiliza Clean Architecture com C# .NET 8 e protocolo GitHub Relay.",
-                ["Projetos/Arquitetura.md", "Brain/Decisoes.md"]));
+                [
+                    new SemanticSearchResult("Projetos/Arquitetura.md", "Arquitetura", "", 0.9f),
+                    new SemanticSearchResult("Brain/Decisoes.md", "Decisoes", "", 0.85f)
+                ]));
 
         var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
         var command = new RemoteCommand(

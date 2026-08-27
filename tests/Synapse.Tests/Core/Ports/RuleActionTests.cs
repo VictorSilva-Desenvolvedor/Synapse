@@ -45,7 +45,7 @@ public class RuleActionTests
             .Select(t => t.Name)
             .ToArray();
 
-        casosConhecidos.ShouldBe(["CreateNote", "AddTags", "MoveNote"], ignoreOrder: true);
+        casosConhecidos.ShouldBe(["CreateNote", "AddTags", "MoveNote", "AppendContent", "PrependContent", "ExtractTasks", "RenameNote"], ignoreOrder: true);
         casosConhecidos.ShouldNotContain(nome => nome.Contains("Delete", StringComparison.OrdinalIgnoreCase));
         casosConhecidos.ShouldNotContain(nome => nome.Contains("Remove", StringComparison.OrdinalIgnoreCase));
     }

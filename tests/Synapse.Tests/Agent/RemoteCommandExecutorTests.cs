@@ -2,6 +2,8 @@ using NSubstitute;
 using Shouldly;
 using Synapse.Agent;
 using Synapse.Agent.Models;
+using Synapse.Brain.Models;
+using Synapse.Brain.Ports;
 using Synapse.Sync.Config;
 
 namespace Synapse.Tests.Agent;
@@ -531,6 +533,231 @@ public class RemoteCommandExecutorTests : IDisposable
         result.Status.ShouldBe(RemoteCommandStatus.Success);
         result.Message.ShouldContain("clicado com sucesso");
         mockUi.Received(1).TryClickElement("obsidian", "Salvar");
+    }
+
+    #endregion
+
+    #region Fase 4: AskVault (RAG Query)
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WhenRemoteControlDisabled_ShouldRejectWithoutCallingBrain()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = false,
+            VaultPath = _tempVaultDir,
+            GeminiApiKey = "fake-key"
+        };
+
+        var mockBrain = Substitute.For<IVaultBrainQuery>();
+        var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string> { ["question"] = "Como funciona o projeto?" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("desativado");
+        await mockBrain.DidNotReceiveWithAnyArgs().AskVaultAsync(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WhenQuestionMissingOrEmpty_ShouldReject()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            GeminiApiKey = "fake-key"
+        };
+
+        var mockBrain = Substitute.For<IVaultBrainQuery>();
+        var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string>(),
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("question");
+        await mockBrain.DidNotReceiveWithAnyArgs().AskVaultAsync(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WhenGeminiApiKeyMissing_ShouldRejectWithoutThrowing()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            GeminiApiKey = ""
+        };
+
+        var mockBrain = Substitute.For<IVaultBrainQuery>();
+        var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string> { ["question"] = "Qual é o plano?" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("Gemini");
+        await mockBrain.DidNotReceiveWithAnyArgs().AskVaultAsync(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WhenBrainQueryIsNull_ShouldRejectSafely()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            GeminiApiKey = "fake-key"
+        };
+
+        var executor = new RemoteCommandExecutor(config, brainQuery: null);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string> { ["question"] = "Onde estão as notas?" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("não configurada");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WhenVaultPathDoesNotExist_ShouldReject()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = Path.Combine(Path.GetTempPath(), $"non-existent-{Guid.NewGuid():N}"),
+            GeminiApiKey = "fake-key"
+        };
+
+        var mockBrain = Substitute.For<IVaultBrainQuery>();
+        var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string> { ["question"] = "Onde estão as notas?" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("Cofre local não configurado ou diretório não encontrado");
+        await mockBrain.DidNotReceiveWithAnyArgs().AskVaultAsync(default!, default!, default);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WhenSuccessWithSources_ShouldReturnAnswerWithSourcesWikilinks()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            GeminiApiKey = "fake-key"
+        };
+
+        var mockBrain = Substitute.For<IVaultBrainQuery>();
+        mockBrain.AskVaultAsync("Como funciona a arquitetura?", _tempVaultDir, Arg.Any<CancellationToken>())
+            .Returns(new RagAnswer(
+                "Como funciona a arquitetura?",
+                "O Synapse utiliza Clean Architecture com C# .NET 8 e protocolo GitHub Relay.",
+                ["Projetos/Arquitetura.md", "Brain/Decisoes.md"]));
+
+        var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string> { ["question"] = "Como funciona a arquitetura?" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Success);
+        result.Message.ShouldContain("O Synapse utiliza Clean Architecture");
+        result.Message.ShouldContain("Fontes: [[Arquitetura]], [[Decisoes]]");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WhenSuccessWithoutSources_ShouldReturnAnswerWithoutSources()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            GeminiApiKey = "fake-key"
+        };
+
+        var mockBrain = Substitute.For<IVaultBrainQuery>();
+        mockBrain.AskVaultAsync("Existe alguma anotação sobre Rust?", _tempVaultDir, Arg.Any<CancellationToken>())
+            .Returns(new RagAnswer(
+                "Existe alguma anotação sobre Rust?",
+                "Não encontrei notas relevantes no seu cofre para responder a essa pergunta.",
+                []));
+
+        var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string> { ["question"] = "Existe alguma anotação sobre Rust?" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Success);
+        result.Message.ShouldBe("Não encontrei notas relevantes no seu cofre para responder a essa pergunta.");
+        result.Message.ShouldNotContain("Fontes:");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WhenBrainQueryThrows_ShouldReturnFailed()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            GeminiApiKey = "fake-key"
+        };
+
+        var mockBrain = Substitute.For<IVaultBrainQuery>();
+        mockBrain.AskVaultAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("Erro de conexão com a API do Gemini."));
+
+        var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string> { ["question"] = "Qual é o resumo?" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Failed);
+        result.Message.ShouldContain("Falha ao consultar o cofre");
+        result.Message.ShouldContain("Erro de conexão");
     }
 
     #endregion

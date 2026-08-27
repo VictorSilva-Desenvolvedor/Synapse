@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Synapse.Core\Synapse.Core.csproj" />
     <ProjectReference Include="..\Synapse.Sync\Synapse.Sync.csproj" />
+    <ProjectReference Include="..\Synapse.Brain\Synapse.Brain.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,5 +1,9 @@
 using System.Diagnostics;
 using Synapse.Agent;
+using Synapse.Brain.Models;
+using Synapse.Brain.Ports;
+using Synapse.Brain.Providers;
+using Synapse.Brain.Services;
 using Synapse.Sync.Auth;
 using Synapse.Sync.Config;
 using Synapse.Sync.GitHub;
@@ -280,10 +284,24 @@ public sealed class TrayApplicationContext : ApplicationContext
             var confirmationPrompt = new WinFormsConfirmationPrompt();
             var uiAutomation = new WindowsUiAutomationAdapter();
 
+            IVaultBrainQuery? brainQuery = null;
+            if (!string.IsNullOrWhiteSpace(config.GeminiApiKey))
+            {
+                var brainConfig = new BrainConfig
+                {
+                    GeminiApiKey = config.GeminiApiKey,
+                    GeminiModel = string.IsNullOrWhiteSpace(config.GeminiModel) ? "gemini-1.5-flash" : config.GeminiModel
+                };
+                var embeddingProvider = new GeminiEmbeddingProvider(brainConfig);
+                var aiProvider = new GeminiAiProvider(brainConfig);
+                brainQuery = new VaultRagEngine(embeddingProvider, aiProvider);
+            }
+
             var executor = new RemoteCommandExecutor(
                 () => configManager.LoadAsync().GetAwaiter().GetResult(),
                 confirmationPrompt: confirmationPrompt,
                 uiAutomation: uiAutomation,
+                brainQuery: brainQuery,
                 auditLog: auditLog);
 
             var pollingInterval = TimeSpan.FromSeconds(

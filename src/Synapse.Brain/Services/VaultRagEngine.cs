@@ -8,7 +8,7 @@ namespace Synapse.Brain.Services;
 /// <summary>
 /// Motor de Busca Semântica Vetorial e RAG (Retrieval-Augmented Generation) para o cofre do Obsidian (V5.1).
 /// </summary>
-public sealed class VaultRagEngine
+public sealed class VaultRagEngine : IVaultBrainQuery
 {
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly IBrainAiProvider _aiProvider;

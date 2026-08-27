@@ -1,7 +1,7 @@
 namespace Synapse.Agent.Models;
 
 /// <summary>
-/// Tipos de comandos remotos suportados pelo agente (Fase 1 e Fase 2).
+/// Tipos de comandos remotos suportados pelo agente (Fases 1, 2 e 4).
 /// </summary>
 public enum RemoteCommandType
 {
@@ -9,5 +9,6 @@ public enum RemoteCommandType
     OpenNote,
     FocusWindow,
     TypeText,
-    ClickElement
+    ClickElement,
+    AskVault
 }

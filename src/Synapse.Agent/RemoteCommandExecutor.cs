@@ -2,18 +2,20 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Synapse.Agent.Models;
+using Synapse.Brain.Ports;
 using Synapse.Sync.Config;
 
 namespace Synapse.Agent;
 
 /// <summary>
-/// Executor seguro de comandos remotos com validação de allowlist, proteção contra path traversal e confirmação interativa para ações sensíveis (Fase 1 e Fase 2).
+/// Executor seguro de comandos remotos com validação de allowlist, proteção contra path traversal, confirmação interativa para ações sensíveis e RAG contra o cofre (Fases 1, 2 e 4).
 /// </summary>
 public sealed class RemoteCommandExecutor
 {
     private readonly Func<SynapseConfig> _configProvider;
     private readonly IRemoteConfirmationPrompt? _confirmationPrompt;
     private readonly IUiAutomationAdapter? _uiAutomation;
+    private readonly IVaultBrainQuery? _brainQuery;
     private readonly RemoteAuditLog? _auditLog;
     private readonly ILogger<RemoteCommandExecutor>? _logger;
 
@@ -21,9 +23,10 @@ public sealed class RemoteCommandExecutor
         SynapseConfig config,
         IRemoteConfirmationPrompt? confirmationPrompt = null,
         IUiAutomationAdapter? uiAutomation = null,
+        IVaultBrainQuery? brainQuery = null,
         RemoteAuditLog? auditLog = null,
         ILogger<RemoteCommandExecutor>? logger = null)
-        : this(() => config, confirmationPrompt, uiAutomation, auditLog, logger)
+        : this(() => config, confirmationPrompt, uiAutomation, brainQuery, auditLog, logger)
     {
     }
 
@@ -31,12 +34,14 @@ public sealed class RemoteCommandExecutor
         Func<SynapseConfig> configProvider,
         IRemoteConfirmationPrompt? confirmationPrompt = null,
         IUiAutomationAdapter? uiAutomation = null,
+        IVaultBrainQuery? brainQuery = null,
         RemoteAuditLog? auditLog = null,
         ILogger<RemoteCommandExecutor>? logger = null)
     {
         _configProvider = configProvider ?? throw new ArgumentNullException(nameof(configProvider));
         _confirmationPrompt = confirmationPrompt;
         _uiAutomation = uiAutomation;
+        _brainQuery = brainQuery;
         _auditLog = auditLog;
         _logger = logger;
     }
@@ -67,6 +72,7 @@ public sealed class RemoteCommandExecutor
                 RemoteCommandType.FocusWindow => ExecuteFocusWindow(command),
                 RemoteCommandType.TypeText => await ExecuteTypeTextAsync(command, config, ct),
                 RemoteCommandType.ClickElement => await ExecuteClickElementAsync(command, config, ct),
+                RemoteCommandType.AskVault => await ExecuteAskVaultAsync(command, config, ct),
                 _ => new RemoteCommandResult(
                     command.Id,
                     DateTimeOffset.UtcNow,
@@ -442,6 +448,81 @@ public sealed class RemoteCommandExecutor
             DateTimeOffset.UtcNow,
             RemoteCommandStatus.Failed,
             $"Elemento '{elementName}' não foi encontrado ou não pôde ser clicado no processo '{cleanName}'.");
+    }
+
+    private async Task<RemoteCommandResult> ExecuteAskVaultAsync(
+        RemoteCommand command,
+        SynapseConfig config,
+        CancellationToken ct)
+    {
+        if (command.Payload == null ||
+            !command.Payload.TryGetValue("question", out var question) ||
+            string.IsNullOrWhiteSpace(question))
+        {
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                "Parâmetro 'question' não informado no payload.");
+        }
+
+        if (string.IsNullOrWhiteSpace(config.GeminiApiKey))
+        {
+            _logger?.LogWarning("Comando AskVault rejeitado: Chave da API Gemini não configurada.");
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                "Chave da API Gemini não configurada nas configurações do Synapse.");
+        }
+
+        if (_brainQuery == null)
+        {
+            _logger?.LogWarning("Comando AskVault rejeitado: IVaultBrainQuery não configurado.");
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                "Consulta ao cofre não configurada nesta sessão.");
+        }
+
+        if (string.IsNullOrWhiteSpace(config.VaultPath) || !Directory.Exists(config.VaultPath))
+        {
+            _logger?.LogWarning("Comando AskVault rejeitado: Cofre local não configurado ou inexistente em '{VaultPath}'", config.VaultPath);
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                "Cofre local não configurado ou diretório não encontrado.");
+        }
+
+        try
+        {
+            _logger?.LogInformation("Executando consulta RAG no cofre para a pergunta: \"{Question}\"", question);
+            var answer = await _brainQuery.AskVaultAsync(question.Trim(), config.VaultPath, ct);
+
+            var answerMessage = answer.Answer;
+            if (answer.Sources != null && answer.Sources.Count > 0)
+            {
+                var sourcesFormatted = string.Join(", ", answer.Sources.Select(s => $"[[{Path.GetFileNameWithoutExtension(s)}]]"));
+                answerMessage += $"\n\nFontes: {sourcesFormatted}";
+            }
+
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Success,
+                answerMessage);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Erro ao processar consulta AskVault para o comando {CommandId}", command.Id);
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Failed,
+                $"Falha ao consultar o cofre com a IA: {ex.Message}");
+        }
     }
 
     private static bool IsProcessAllowed(string processName, SynapseConfig config)

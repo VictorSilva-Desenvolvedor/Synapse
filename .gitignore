@@ -17,6 +17,7 @@ dist/
 **/dist/
 packaging/inno/Output/
 .synapse/snapshots/
+plugins/obsidian-synapse/main.js
 
 # User-specific files
 *.rsuser

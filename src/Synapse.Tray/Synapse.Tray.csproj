@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon></ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Synapse.Core\Synapse.Core.csproj" />
+    <ProjectReference Include="..\Synapse.Sync\Synapse.Sync.csproj" />
+    <ProjectReference Include="..\Synapse.Conflict\Synapse.Conflict.csproj" />
+    <ProjectReference Include="..\Synapse.Brain\Synapse.Brain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Synapse.Tests" />
+  </ItemGroup>
+
+</Project>

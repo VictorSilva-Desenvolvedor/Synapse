@@ -746,7 +746,7 @@ public class RemoteCommandExecutorTests : IDisposable
 
         var mockBrain = Substitute.For<IVaultBrainQuery>();
         mockBrain.AskVaultAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .ThrowsAsync(new HttpRequestException("Erro de conexão com a API do Gemini."));
+            .Returns<Task<RagAnswer>>(_ => Task.FromException<RagAnswer>(new HttpRequestException("Erro de conexão com a API do Gemini.")));
 
         var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
         var command = new RemoteCommand(

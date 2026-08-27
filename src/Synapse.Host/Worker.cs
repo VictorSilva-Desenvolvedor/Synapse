@@ -31,7 +31,7 @@ public sealed class Worker : BackgroundService
     private readonly GitHubAuthManager _authManager;
     private readonly GitHubClientConfig _gitHubConfig;
     private readonly IVaultWatcher _vaultWatcher;
-    private readonly IConfiguration _configuration;
+    private readonly SynapseHostPaths _paths;
     private readonly ILogger<Worker> _logger;
     private readonly ILoggerFactory _loggerFactory;
 
@@ -61,7 +61,7 @@ public sealed class Worker : BackgroundService
         GitHubAuthManager authManager,
         GitHubClientConfig gitHubConfig,
         IVaultWatcher vaultWatcher,
-        IConfiguration configuration,
+        SynapseHostPaths paths,
         ILogger<Worker> logger,
         ILoggerFactory loggerFactory)
     {
@@ -73,7 +73,7 @@ public sealed class Worker : BackgroundService
         _authManager = authManager ?? throw new ArgumentNullException(nameof(authManager));
         _gitHubConfig = gitHubConfig ?? throw new ArgumentNullException(nameof(gitHubConfig));
         _vaultWatcher = vaultWatcher ?? throw new ArgumentNullException(nameof(vaultWatcher));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
     }
@@ -82,8 +82,13 @@ public sealed class Worker : BackgroundService
     {
         _logger.LogInformation("Iniciando serviço Synapse...");
 
-        var synapseConfig = _configuration.GetSection("Synapse");
-        _vaultPath = synapseConfig["VaultPath"] ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "SynapseVault");
+        _vaultPath = _paths.VaultPath;
+        if (string.IsNullOrWhiteSpace(_vaultPath))
+        {
+            _logger.LogError("VaultPath não configurado — rode o onboarding do Tray antes de iniciar o Host.");
+            return;
+        }
+
         var baseCachePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Synapse", "base_cache");
         _rulesFilePath = Path.Combine(_vaultPath, ".synapse", "regras.yaml");
         _ignoreFilePath = Path.Combine(_vaultPath, ".synapseignore");

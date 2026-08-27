@@ -55,10 +55,15 @@ public sealed class IpcServer : IAsyncDisposable
                     PipeTransmissionMode.Byte,
                     PipeOptions.Asynchronous);
 
+                using var reg = ct.Register(state => ((IDisposable)state!).Dispose(), pipeServer);
                 await pipeServer.WaitForConnectionAsync(ct);
                 _ = HandleClientConnectionAsync(pipeServer, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (ObjectDisposedException) when (ct.IsCancellationRequested)
             {
                 break;
             }

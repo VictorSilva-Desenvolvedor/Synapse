@@ -32,22 +32,19 @@ builder.Services.AddSerilog();
 var configManager = new Synapse.Sync.Config.SynapseConfigManager();
 var savedConfig = configManager.LoadAsync().GetAwaiter().GetResult();
 
+var hostPaths = SynapseHostPaths.Resolve(savedConfig, builder.Configuration);
+var vaultPath = hostPaths.VaultPath;
+var dbPath = hostPaths.DatabasePath;
+
 var synapseSection = builder.Configuration.GetSection("Synapse");
-var vaultPath = !string.IsNullOrWhiteSpace(savedConfig.VaultPath)
-    ? savedConfig.VaultPath
-    : (synapseSection["VaultPath"] ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "SynapseVault"));
-
-var dbPath = !string.IsNullOrWhiteSpace(savedConfig.DatabasePath)
-    ? savedConfig.DatabasePath
-    : (synapseSection["DatabasePath"] ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Synapse", "synapse.db"));
-
 var gitHubConfig = new GitHubClientConfig
 {
-    Owner = !string.IsNullOrWhiteSpace(savedConfig.Owner) ? savedConfig.Owner : (synapseSection.GetSection("GitHub")["Owner"] ?? string.Empty),
-    Repository = !string.IsNullOrWhiteSpace(savedConfig.Repository) ? savedConfig.Repository : (synapseSection.GetSection("GitHub")["Repository"] ?? "Synapse-Vault"),
-    Branch = !string.IsNullOrWhiteSpace(savedConfig.Branch) ? savedConfig.Branch : (synapseSection.GetSection("GitHub")["Branch"] ?? "main")
+    Owner = !string.IsNullOrWhiteSpace(savedConfig.Owner) ? savedConfig.Owner : (!string.IsNullOrWhiteSpace(synapseSection.GetSection("GitHub")["Owner"]) ? synapseSection.GetSection("GitHub")["Owner"]! : string.Empty),
+    Repository = !string.IsNullOrWhiteSpace(savedConfig.Repository) ? savedConfig.Repository : (!string.IsNullOrWhiteSpace(synapseSection.GetSection("GitHub")["Repository"]) ? synapseSection.GetSection("GitHub")["Repository"]! : "Synapse-Vault"),
+    Branch = !string.IsNullOrWhiteSpace(savedConfig.Branch) ? savedConfig.Branch : (!string.IsNullOrWhiteSpace(synapseSection.GetSection("GitHub")["Branch"]) ? synapseSection.GetSection("GitHub")["Branch"]! : "main")
 };
 
+builder.Services.AddSingleton(hostPaths);
 builder.Services.AddSingleton(gitHubConfig);
 
 // Registro das Portas e Adaptadores Hexagonais

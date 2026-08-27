@@ -24,7 +24,7 @@ Compression=lzma2/ultra
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
@@ -55,4 +55,4 @@ Filename: "{app}\Tray\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#String
 
 [UninstallRun]
 ; Remove o serviço do Windows antes de desinstalar os arquivos
-Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\uninstall.ps1"""; StatusMsg: "Removendo serviço do Windows..."; Flags: runhidden
+Filename: "powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\uninstall.ps1"""; StatusMsg: "Removendo serviço do Windows..."; RunOnceId: "SynapseUninstallService"; Flags: runhidden

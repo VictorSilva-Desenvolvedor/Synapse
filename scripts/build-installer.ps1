@@ -20,6 +20,7 @@ Write-Host "1. Publicando binários self-contained..." -ForegroundColor Yellow
 
 # 2. Localiza o compilador do Inno Setup (ISCC.exe)
 $isccPaths = @(
+    "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe",
@@ -39,6 +40,10 @@ $issFile = Join-Path $PSScriptRoot "..\packaging\inno\Synapse.iss"
 if ($isccExe) {
     Write-Host "2. Compilando instalador gráfico com Inno Setup ($isccExe)..." -ForegroundColor Yellow
     & $isccExe $issFile
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Falha na compilação do instalador pelo Inno Setup (Código de saída: $LASTEXITCODE)."
+        exit $LASTEXITCODE
+    }
     Write-Host "Instalador gerado com sucesso em: dist\Installer\" -ForegroundColor Green
 } else {
     Write-Host "Inno Setup (ISCC.exe) não encontrado no caminho padrão." -ForegroundColor DarkYellow

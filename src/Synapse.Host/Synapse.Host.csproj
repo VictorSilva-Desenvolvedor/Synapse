@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
     <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
     <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
@@ -22,5 +23,10 @@
     <ProjectReference Include="..\Synapse.Conflict\Synapse.Conflict.csproj" />
     <ProjectReference Include="..\Synapse.Rules\Synapse.Rules.csproj" />
     <ProjectReference Include="..\Synapse.Data\Synapse.Data.csproj" />
+    <ProjectReference Include="..\Synapse.Brain\Synapse.Brain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Synapse.Tests" />
   </ItemGroup>
 </Project>

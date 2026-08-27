@@ -7,29 +7,41 @@ using Synapse.Sync.Config;
 namespace Synapse.Agent;
 
 /// <summary>
-/// Executor seguro de comandos remotos com validação de allowlist e proteção contra path traversal (Fase 1).
+/// Executor seguro de comandos remotos com validação de allowlist, proteção contra path traversal e confirmação interativa para ações sensíveis (Fase 1 e Fase 2).
 /// </summary>
 public sealed class RemoteCommandExecutor
 {
     private readonly Func<SynapseConfig> _configProvider;
+    private readonly IRemoteConfirmationPrompt? _confirmationPrompt;
+    private readonly IUiAutomationAdapter? _uiAutomation;
+    private readonly RemoteAuditLog? _auditLog;
     private readonly ILogger<RemoteCommandExecutor>? _logger;
 
     public RemoteCommandExecutor(
         SynapseConfig config,
+        IRemoteConfirmationPrompt? confirmationPrompt = null,
+        IUiAutomationAdapter? uiAutomation = null,
+        RemoteAuditLog? auditLog = null,
         ILogger<RemoteCommandExecutor>? logger = null)
-        : this(() => config, logger)
+        : this(() => config, confirmationPrompt, uiAutomation, auditLog, logger)
     {
     }
 
     public RemoteCommandExecutor(
         Func<SynapseConfig> configProvider,
+        IRemoteConfirmationPrompt? confirmationPrompt = null,
+        IUiAutomationAdapter? uiAutomation = null,
+        RemoteAuditLog? auditLog = null,
         ILogger<RemoteCommandExecutor>? logger = null)
     {
         _configProvider = configProvider ?? throw new ArgumentNullException(nameof(configProvider));
+        _confirmationPrompt = confirmationPrompt;
+        _uiAutomation = uiAutomation;
+        _auditLog = auditLog;
         _logger = logger;
     }
 
-    public Task<RemoteCommandResult> ExecuteAsync(RemoteCommand command, CancellationToken ct = default)
+    public async Task<RemoteCommandResult> ExecuteAsync(RemoteCommand command, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(command);
 
@@ -39,37 +51,37 @@ public sealed class RemoteCommandExecutor
         if (!config.RemoteControlEnabled)
         {
             _logger?.LogWarning("Comando remoto {CommandId} ({Type}) rejeitado: Controle remoto desativado nas configurações.", command.Id, command.Type);
-            return Task.FromResult(new RemoteCommandResult(
+            return new RemoteCommandResult(
                 command.Id,
                 DateTimeOffset.UtcNow,
                 RemoteCommandStatus.Rejected,
-                "Controle remoto desativado"));
+                "Controle remoto desativado");
         }
 
         try
         {
-            var result = command.Type switch
+            return command.Type switch
             {
                 RemoteCommandType.OpenApp => ExecuteOpenApp(command, config),
                 RemoteCommandType.OpenNote => ExecuteOpenNote(command, config),
                 RemoteCommandType.FocusWindow => ExecuteFocusWindow(command),
+                RemoteCommandType.TypeText => await ExecuteTypeTextAsync(command, config, ct),
+                RemoteCommandType.ClickElement => await ExecuteClickElementAsync(command, config, ct),
                 _ => new RemoteCommandResult(
                     command.Id,
                     DateTimeOffset.UtcNow,
                     RemoteCommandStatus.Rejected,
                     $"Tipo de comando '{command.Type}' desconhecido ou não suportado.")
             };
-
-            return Task.FromResult(result);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Erro inesperado ao executar comando remoto {CommandId} ({Type})", command.Id, command.Type);
-            return Task.FromResult(new RemoteCommandResult(
+            return new RemoteCommandResult(
                 command.Id,
                 DateTimeOffset.UtcNow,
                 RemoteCommandStatus.Failed,
-                $"Erro interno na execução: {ex.Message}"));
+                $"Erro interno na execução: {ex.Message}");
         }
     }
 
@@ -258,6 +270,205 @@ public sealed class RemoteCommandExecutor
                 RemoteCommandStatus.Success,
                 $"Não foi possível focar a janela do processo '{cleanName}': {ex.Message}");
         }
+    }
+
+    private async Task<RemoteCommandResult> ExecuteTypeTextAsync(
+        RemoteCommand command,
+        SynapseConfig config,
+        CancellationToken ct)
+    {
+        if (command.Payload == null ||
+            !command.Payload.TryGetValue("processName", out var processName) ||
+            string.IsNullOrWhiteSpace(processName) ||
+            !command.Payload.TryGetValue("text", out var text) ||
+            text is null)
+        {
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                "Parâmetros 'processName' e 'text' são obrigatórios para o comando TypeText.");
+        }
+
+        var cleanName = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase).Trim();
+
+        // 1. Validação de Allowlist (reaproveitada de RemoteAllowedApps)
+        if (!IsProcessAllowed(processName, config))
+        {
+            _logger?.LogWarning("Tentativa de digitação em processo não permitido: '{ProcessName}'", processName);
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                $"Processo '{processName}' não está na lista de aplicativos permitidos (RemoteAllowedApps).");
+        }
+
+        // 2. Confirmação Humana Obrigatória
+        if (_confirmationPrompt == null)
+        {
+            _logger?.LogWarning("Comando sensível TypeText rejeitado: IRemoteConfirmationPrompt não configurado.");
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                "Ação sensível rejeitada: nenhum mecanismo de confirmação interativa configurado.");
+        }
+
+        var timeout = TimeSpan.FromSeconds(
+            config.RemoteConfirmationTimeoutSeconds > 0
+                ? config.RemoteConfirmationTimeoutSeconds
+                : 30);
+
+        var confirmed = await _confirmationPrompt.ConfirmAsync(command, timeout, ct);
+        if (!confirmed)
+        {
+            _logger?.LogInformation("Comando sensível TypeText ({CommandId}) negado ou expirado pelo usuário.", command.Id);
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                "Ação sensível rejeitada ou não confirmada pelo usuário.");
+        }
+
+        // 3. Execução via UI Automation Adapter
+        if (_uiAutomation == null)
+        {
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Failed,
+                "Adaptador de UI Automation não configurado.");
+        }
+
+        var success = _uiAutomation.TrySendText(cleanName, text);
+        if (success)
+        {
+            _logger?.LogInformation("Texto digitado com sucesso no processo '{ProcessName}' via comando {CommandId}.", cleanName, command.Id);
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Success,
+                $"Texto digitado com sucesso no processo '{cleanName}'.");
+        }
+
+        return new RemoteCommandResult(
+            command.Id,
+            DateTimeOffset.UtcNow,
+            RemoteCommandStatus.Failed,
+            $"Falha ao digitar texto no processo '{cleanName}' (janela não encontrada ou erro no envio).");
+    }
+
+    private async Task<RemoteCommandResult> ExecuteClickElementAsync(
+        RemoteCommand command,
+        SynapseConfig config,
+        CancellationToken ct)
+    {
+        if (command.Payload == null ||
+            !command.Payload.TryGetValue("processName", out var processName) ||
+            string.IsNullOrWhiteSpace(processName) ||
+            !command.Payload.TryGetValue("elementName", out var elementName) ||
+            string.IsNullOrWhiteSpace(elementName))
+        {
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                "Parâmetros 'processName' e 'elementName' são obrigatórios para o comando ClickElement.");
+        }
+
+        var cleanName = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase).Trim();
+
+        // 1. Validação de Allowlist (reaproveitada de RemoteAllowedApps)
+        if (!IsProcessAllowed(processName, config))
+        {
+            _logger?.LogWarning("Tentativa de clique em processo não permitido: '{ProcessName}'", processName);
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                $"Processo '{processName}' não está na lista de aplicativos permitidos (RemoteAllowedApps).");
+        }
+
+        // 2. Confirmação Humana Obrigatória
+        if (_confirmationPrompt == null)
+        {
+            _logger?.LogWarning("Comando sensível ClickElement rejeitado: IRemoteConfirmationPrompt não configurado.");
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                "Ação sensível rejeitada: nenhum mecanismo de confirmação interativa configurado.");
+        }
+
+        var timeout = TimeSpan.FromSeconds(
+            config.RemoteConfirmationTimeoutSeconds > 0
+                ? config.RemoteConfirmationTimeoutSeconds
+                : 30);
+
+        var confirmed = await _confirmationPrompt.ConfirmAsync(command, timeout, ct);
+        if (!confirmed)
+        {
+            _logger?.LogInformation("Comando sensível ClickElement ({CommandId}) negado ou expirado pelo usuário.", command.Id);
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Rejected,
+                "Ação sensível rejeitada ou não confirmada pelo usuário.");
+        }
+
+        // 3. Execução via UI Automation Adapter
+        if (_uiAutomation == null)
+        {
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Failed,
+                "Adaptador de UI Automation não configurado.");
+        }
+
+        var success = _uiAutomation.TryClickElement(cleanName, elementName);
+        if (success)
+        {
+            _logger?.LogInformation("Elemento '{ElementName}' clicado com sucesso no processo '{ProcessName}' via comando {CommandId}.", elementName, cleanName, command.Id);
+            return new RemoteCommandResult(
+                command.Id,
+                DateTimeOffset.UtcNow,
+                RemoteCommandStatus.Success,
+                $"Elemento '{elementName}' clicado com sucesso no processo '{cleanName}'.");
+        }
+
+        return new RemoteCommandResult(
+            command.Id,
+            DateTimeOffset.UtcNow,
+            RemoteCommandStatus.Failed,
+            $"Elemento '{elementName}' não foi encontrado ou não pôde ser clicado no processo '{cleanName}'.");
+    }
+
+    private static bool IsProcessAllowed(string processName, SynapseConfig config)
+    {
+        if (config.RemoteAllowedApps == null || config.RemoteAllowedApps.Count == 0)
+        {
+            return false;
+        }
+
+        var cleanProcess = processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase).Trim();
+
+        foreach (var kvp in config.RemoteAllowedApps)
+        {
+            if (string.Equals(kvp.Key.Trim(), cleanProcess, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var valClean = Path.GetFileNameWithoutExtension(kvp.Value?.Trim() ?? string.Empty);
+            if (string.Equals(valClean, cleanProcess, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(kvp.Value?.Trim(), processName.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     [DllImport("user32.dll")]

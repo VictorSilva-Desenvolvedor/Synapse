@@ -20,9 +20,18 @@ public sealed class RemoteAuditLog
         _logger = logger;
     }
 
+    public Task LogEntryAsync(
+        RemoteCommand command,
+        RemoteCommandResult result,
+        CancellationToken ct = default)
+    {
+        return LogEntryAsync(command, result, confirmationStatus: null, ct);
+    }
+
     public async Task LogEntryAsync(
         RemoteCommand command,
         RemoteCommandResult result,
+        string? confirmationStatus = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -37,6 +46,7 @@ public sealed class RemoteAuditLog
             RequestedBy = command.RequestedBy,
             Payload = command.Payload,
             Status = result.Status.ToString(),
+            Confirmation = confirmationStatus,
             CompletedAt = result.CompletedAt,
             Message = result.Message
         };
@@ -45,10 +55,11 @@ public sealed class RemoteAuditLog
 
         // 1. Grava no logger da aplicação
         _logger?.LogInformation(
-            "AUDIT REMOTE: [{Status}] Command={CommandId} Type={Type} By={RequestedBy} Msg={Message}",
+            "AUDIT REMOTE: [{Status}] Command={CommandId} Type={Type} Confirmation={Confirmation} By={RequestedBy} Msg={Message}",
             result.Status,
             command.Id,
             command.Type,
+            confirmationStatus ?? "N/A",
             command.RequestedBy,
             result.Message);
 

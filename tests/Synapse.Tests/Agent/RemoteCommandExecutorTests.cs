@@ -1,3 +1,4 @@
+using NSubstitute;
 using Shouldly;
 using Synapse.Agent;
 using Synapse.Agent.Models;
@@ -183,6 +184,356 @@ public class RemoteCommandExecutorTests : IDisposable
         result.Status.ShouldBe(RemoteCommandStatus.Success);
         result.Message.ShouldContain("não está em execução");
     }
+
+    #region Fase 2: TypeText Tests
+
+    [Fact]
+    public async Task ExecuteAsync_TypeText_WhenMissingPayload_ShouldReject()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir
+        };
+
+        var executor = new RemoteCommandExecutor(config);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.TypeText,
+            Payload: new Dictionary<string, string> { ["processName"] = "notepad" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("obrigatórios");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TypeText_WhenProcessNotInAllowlist_ShouldRejectWithoutPromptOrUi()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            RemoteAllowedApps = new Dictionary<string, string>
+            {
+                ["obsidian"] = "Obsidian.exe"
+            }
+        };
+
+        var mockPrompt = Substitute.For<IRemoteConfirmationPrompt>();
+        var mockUi = Substitute.For<IUiAutomationAdapter>();
+
+        var executor = new RemoteCommandExecutor(config, mockPrompt, mockUi);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.TypeText,
+            Payload: new Dictionary<string, string>
+            {
+                ["processName"] = "cmd",
+                ["text"] = "calc.exe"
+            },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("não está na lista de aplicativos permitidos");
+
+        await mockPrompt.DidNotReceiveWithAnyArgs().ConfirmAsync(default!, default, default);
+        mockUi.DidNotReceiveWithAnyArgs().TrySendText(default!, default!);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TypeText_WhenConfirmationPromptIsNull_ShouldRejectNeverAutoApprove()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            RemoteAllowedApps = new Dictionary<string, string>
+            {
+                ["notepad"] = "notepad.exe"
+            }
+        };
+
+        var mockUi = Substitute.For<IUiAutomationAdapter>();
+        var executor = new RemoteCommandExecutor(config, confirmationPrompt: null, uiAutomation: mockUi);
+
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.TypeText,
+            Payload: new Dictionary<string, string>
+            {
+                ["processName"] = "notepad",
+                ["text"] = "Hello World"
+            },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("nenhum mecanismo de confirmação");
+        mockUi.DidNotReceiveWithAnyArgs().TrySendText(default!, default!);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TypeText_WhenConfirmationDenied_ShouldRejectWithoutExecutingUi()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            RemoteAllowedApps = new Dictionary<string, string>
+            {
+                ["notepad"] = "notepad.exe"
+            }
+        };
+
+        var mockPrompt = Substitute.For<IRemoteConfirmationPrompt>();
+        mockPrompt.ConfirmAsync(Arg.Any<RemoteCommand>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var mockUi = Substitute.For<IUiAutomationAdapter>();
+
+        var executor = new RemoteCommandExecutor(config, mockPrompt, mockUi);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.TypeText,
+            Payload: new Dictionary<string, string>
+            {
+                ["processName"] = "notepad",
+                ["text"] = "Hello World"
+            },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("não confirmada");
+        mockUi.DidNotReceiveWithAnyArgs().TrySendText(default!, default!);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TypeText_WhenConfirmationApproved_ShouldCallUiAutomationAndReturnSuccess()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            RemoteAllowedApps = new Dictionary<string, string>
+            {
+                ["notepad"] = "C:\\Windows\\notepad.exe"
+            }
+        };
+
+        var mockPrompt = Substitute.For<IRemoteConfirmationPrompt>();
+        mockPrompt.ConfirmAsync(Arg.Any<RemoteCommand>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var mockUi = Substitute.For<IUiAutomationAdapter>();
+        mockUi.TrySendText("notepad", "Texto Digitado").Returns(true);
+
+        var executor = new RemoteCommandExecutor(config, mockPrompt, mockUi);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.TypeText,
+            Payload: new Dictionary<string, string>
+            {
+                ["processName"] = "notepad.exe",
+                ["text"] = "Texto Digitado"
+            },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Success);
+        result.Message.ShouldContain("Texto digitado com sucesso");
+        mockUi.Received(1).TrySendText("notepad", "Texto Digitado");
+    }
+
+    #endregion
+
+    #region Fase 2: ClickElement Tests
+
+    [Fact]
+    public async Task ExecuteAsync_ClickElement_WhenMissingPayload_ShouldReject()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir
+        };
+
+        var executor = new RemoteCommandExecutor(config);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.ClickElement,
+            Payload: new Dictionary<string, string> { ["processName"] = "obsidian" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("obrigatórios");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ClickElement_WhenProcessNotInAllowlist_ShouldRejectWithoutPromptOrUi()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            RemoteAllowedApps = new Dictionary<string, string>
+            {
+                ["obsidian"] = "Obsidian.exe"
+            }
+        };
+
+        var mockPrompt = Substitute.For<IRemoteConfirmationPrompt>();
+        var mockUi = Substitute.For<IUiAutomationAdapter>();
+
+        var executor = new RemoteCommandExecutor(config, mockPrompt, mockUi);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.ClickElement,
+            Payload: new Dictionary<string, string>
+            {
+                ["processName"] = "explorer",
+                ["elementName"] = "Fechar"
+            },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("não está na lista de aplicativos permitidos");
+
+        await mockPrompt.DidNotReceiveWithAnyArgs().ConfirmAsync(default!, default, default);
+        mockUi.DidNotReceiveWithAnyArgs().TryClickElement(default!, default!);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ClickElement_WhenConfirmationPromptIsNull_ShouldRejectNeverAutoApprove()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            RemoteAllowedApps = new Dictionary<string, string>
+            {
+                ["obsidian"] = "Obsidian.exe"
+            }
+        };
+
+        var mockUi = Substitute.For<IUiAutomationAdapter>();
+        var executor = new RemoteCommandExecutor(config, confirmationPrompt: null, uiAutomation: mockUi);
+
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.ClickElement,
+            Payload: new Dictionary<string, string>
+            {
+                ["processName"] = "obsidian",
+                ["elementName"] = "Sync Now"
+            },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("nenhum mecanismo de confirmação");
+        mockUi.DidNotReceiveWithAnyArgs().TryClickElement(default!, default!);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ClickElement_WhenConfirmationDenied_ShouldRejectWithoutExecutingUi()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            RemoteAllowedApps = new Dictionary<string, string>
+            {
+                ["obsidian"] = "Obsidian.exe"
+            }
+        };
+
+        var mockPrompt = Substitute.For<IRemoteConfirmationPrompt>();
+        mockPrompt.ConfirmAsync(Arg.Any<RemoteCommand>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var mockUi = Substitute.For<IUiAutomationAdapter>();
+
+        var executor = new RemoteCommandExecutor(config, mockPrompt, mockUi);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.ClickElement,
+            Payload: new Dictionary<string, string>
+            {
+                ["processName"] = "obsidian",
+                ["elementName"] = "Sync Now"
+            },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
+        result.Message.ShouldContain("não confirmada");
+        mockUi.DidNotReceiveWithAnyArgs().TryClickElement(default!, default!);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ClickElement_WhenConfirmationApproved_ShouldCallUiAutomationAndReturnSuccess()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            RemoteAllowedApps = new Dictionary<string, string>
+            {
+                ["obsidian"] = "C:\\Users\\AppData\\Obsidian.exe"
+            }
+        };
+
+        var mockPrompt = Substitute.For<IRemoteConfirmationPrompt>();
+        mockPrompt.ConfirmAsync(Arg.Any<RemoteCommand>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+            .Returns(true);
+
+        var mockUi = Substitute.For<IUiAutomationAdapter>();
+        mockUi.TryClickElement("obsidian", "Salvar").Returns(true);
+
+        var executor = new RemoteCommandExecutor(config, mockPrompt, mockUi);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.ClickElement,
+            Payload: new Dictionary<string, string>
+            {
+                ["processName"] = "obsidian",
+                ["elementName"] = "Salvar"
+            },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Success);
+        result.Message.ShouldContain("clicado com sucesso");
+        mockUi.Received(1).TryClickElement("obsidian", "Salvar");
+    }
+
+    #endregion
 
     public void Dispose()
     {

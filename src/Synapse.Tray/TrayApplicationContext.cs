@@ -3,6 +3,7 @@ using Synapse.Agent;
 using Synapse.Sync.Auth;
 using Synapse.Sync.Config;
 using Synapse.Sync.GitHub;
+using Synapse.Tray.Agent;
 using Synapse.Tray.Ipc;
 using Timer = System.Windows.Forms.Timer;
 
@@ -275,10 +276,15 @@ public sealed class TrayApplicationContext : ApplicationContext
             var gitHubProvider = new GitHubProvider(authManager, clientConfig);
             var configManager = new SynapseConfigManager();
 
-            var executor = new RemoteCommandExecutor(
-                () => configManager.LoadAsync().GetAwaiter().GetResult());
-
             var auditLog = new RemoteAuditLog(config.VaultPath);
+            var confirmationPrompt = new WinFormsConfirmationPrompt();
+            var uiAutomation = new WindowsUiAutomationAdapter();
+
+            var executor = new RemoteCommandExecutor(
+                () => configManager.LoadAsync().GetAwaiter().GetResult(),
+                confirmationPrompt: confirmationPrompt,
+                uiAutomation: uiAutomation,
+                auditLog: auditLog);
 
             var pollingInterval = TimeSpan.FromSeconds(
                 config.RemoteControlPollingIntervalSeconds > 0

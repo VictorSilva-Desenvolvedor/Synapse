@@ -1,0 +1,23 @@
+PackageIdentifier: VictorSilva.Synapse
+PackageVersion: 1.0.0
+PackageLocale: en-US
+Publisher: Victor Silva
+PublisherUrl: https://github.com/VictorSilva-Desenvolvedor
+PublisherSupportUrl: https://github.com/VictorSilva-Desenvolvedor/Synapse/issues
+PackageName: Synapse
+PackageUrl: https://github.com/VictorSilva-Desenvolvedor/Synapse
+License: MIT
+LicenseUrl: https://github.com/VictorSilva-Desenvolvedor/Synapse/blob/main/LICENSE
+ShortDescription: Zero-cost background Windows service synchronizing Obsidian vaults with private GitHub repositories.
+Description: |
+  Synapse is a local-first Windows background service that keeps your Obsidian vault synchronized with a private GitHub repository.
+  It includes intelligent 3-way conflict resolution, automated frontmatter & tagging rules, and a lightweight system tray status app.
+Tags:
+  - obsidian
+  - sync
+  - github
+  - markdown
+  - backup
+  - pkm
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

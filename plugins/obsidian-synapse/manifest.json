@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-synapse",
+  "name": "Synapse Sync Status",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Exibe o status de sincronização em tempo real do serviço Synapse na barra de status do Obsidian.",
+  "author": "Victor Silva",
+  "authorUrl": "https://github.com/VictorSilva-Desenvolvedor",
+  "isDesktopOnly": true
+}

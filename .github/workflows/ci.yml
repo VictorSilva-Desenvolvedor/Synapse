@@ -1,32 +1,72 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+    tags: ['v*']
 
 jobs:
   build-and-test:
-    # ubuntu-latest custa 1x minuto (windows-latest custa 2x) — repositorio e privado,
-    # com cota mensal limitada (ADR-011). Nada em Synapse.Host ainda usa API especifica
-    # de Windows (DPAPI/Windows Service/bandeja, RNF-7); migrar para windows-latest
-    # quando esse codigo chegar.
-    runs-on: ubuntu-latest
+    name: Build & Test
+    runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Configurar .NET
+      - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
 
-      - name: Restaurar dependencias
-        run: dotnet restore
+      - name: Restore Dependencies
+        run: dotnet restore Synapse.sln
 
-      - name: Build
-        run: dotnet build --no-restore --configuration Release
+      - name: Verify Code Formatting
+        run: dotnet format --verify-no-changes --verbosity normal
 
-      - name: Testes
-        run: dotnet test --no-build --configuration Release
+      - name: Build Solution
+        run: dotnet build Synapse.sln --no-restore --configuration Release
+
+      - name: Run Tests
+        run: dotnet test Synapse.sln --no-build --configuration Release --verbosity normal
+
+  publish-and-release:
+    name: Package & Release
+    runs-on: windows-latest
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Publish Self-Contained Packages
+        shell: powershell
+        run: powershell.exe -ExecutionPolicy Bypass -File scripts/publish.ps1 -Configuration Release
+
+      - name: Compress Release Package
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $zipPath = "dist/Synapse-$tag-win-x64.zip"
+          Compress-Archive -Path "dist/Synapse/*" -DestinationPath $zipPath -Force
+          Write-Host "Pacote de release gerado com sucesso em: $zipPath"
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Synapse-*-win-x64.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false

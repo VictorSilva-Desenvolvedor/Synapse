@@ -1,0 +1,25 @@
+{
+  "name": "obsidian-synapse",
+  "version": "1.0.0",
+  "description": "Obsidian plugin for Synapse background sync service",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production"
+  },
+  "keywords": [
+    "obsidian",
+    "synapse",
+    "sync",
+    "github"
+  ],
+  "author": "Victor Silva",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "esbuild": "0.20.1",
+    "obsidian": "latest",
+    "tslib": "2.6.2",
+    "typescript": "5.3.3"
+  }
+}

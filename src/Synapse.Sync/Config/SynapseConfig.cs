@@ -39,6 +39,11 @@ public sealed class SynapseConfig
     public string GeminiApiKey { get; set; } = string.Empty;
     public string GeminiModel { get; set; } = "gemini-1.5-flash";
 
+    // Controle Remoto via GitHub Relay (Fase 1)
+    public bool RemoteControlEnabled { get; set; } = false;
+    public int RemoteControlPollingIntervalSeconds { get; set; } = 10;
+    public Dictionary<string, string> RemoteAllowedApps { get; set; } = new();
+
     // Suporte a Múltiplos Cofres (V2.3)
     public List<VaultProfile> Vaults { get; set; } = new();
 

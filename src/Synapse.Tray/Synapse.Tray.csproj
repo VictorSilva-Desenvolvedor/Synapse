@@ -14,6 +14,7 @@
     <ProjectReference Include="..\Synapse.Sync\Synapse.Sync.csproj" />
     <ProjectReference Include="..\Synapse.Conflict\Synapse.Conflict.csproj" />
     <ProjectReference Include="..\Synapse.Brain\Synapse.Brain.csproj" />
+    <ProjectReference Include="..\Synapse.Agent\Synapse.Agent.csproj" />
   </ItemGroup>
 
   <ItemGroup>

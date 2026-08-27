@@ -33,6 +33,7 @@
     <ProjectReference Include="..\..\src\Synapse.Host\Synapse.Host.csproj" />
     <ProjectReference Include="..\..\src\Synapse.Tray\Synapse.Tray.csproj" />
     <ProjectReference Include="..\..\src\Synapse.Brain\Synapse.Brain.csproj" />
+    <ProjectReference Include="..\..\src\Synapse.Agent\Synapse.Agent.csproj" />
   </ItemGroup>
 
 </Project>

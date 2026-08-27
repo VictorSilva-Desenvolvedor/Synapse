@@ -15,6 +15,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _statusHeaderItem;
     private readonly ToolStripMenuItem _pauseResumeItem;
     private readonly ToolStripMenuItem _reconnectItem;
+    private readonly ToolStripMenuItem _remoteControlItem;
     private readonly ToolStripMenuItem _openLogsItem;
     private readonly ToolStripMenuItem _exitItem;
     private readonly Timer _pollTimer;
@@ -36,6 +37,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         _pauseResumeItem = new ToolStripMenuItem("Pausar Sincronização", null, async (_, _) => await TogglePauseAsync());
         _reconnectItem = new ToolStripMenuItem("Reconectar GitHub", null, async (_, _) => await ReconnectAsync());
+        _remoteControlItem = new ToolStripMenuItem("Controle Remoto: Desativado", null, async (_, _) => await ToggleRemoteControlAsync());
         var quickCaptureItem = new ToolStripMenuItem("🧠 Captura Rápida (Segundo Cérebro)...", null, (_, _) => OpenQuickCapture());
         var chatVaultItem = new ToolStripMenuItem("💬 Conversar com o Cofre (Chat & RAG)...", null, (_, _) => OpenChatVault());
         var reviewItem = new ToolStripMenuItem("🗂️ Revisar Flashcards (SM-2)...", null, (_, _) => OpenFlashcardReview());
@@ -54,6 +56,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add(_pauseResumeItem);
         contextMenu.Items.Add(_reconnectItem);
+        contextMenu.Items.Add(_remoteControlItem);
         contextMenu.Items.Add(new ToolStripSeparator());
         contextMenu.Items.Add(diagnosticsItem);
         contextMenu.Items.Add(settingsItem);
@@ -187,9 +190,47 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    private async Task ToggleRemoteControlAsync()
+    {
+        try
+        {
+            var configManager = new Synapse.Sync.Config.SynapseConfigManager();
+            var config = await configManager.LoadAsync();
+            config.RemoteControlEnabled = !config.RemoteControlEnabled;
+            await configManager.SaveAsync(config);
+
+            _remoteControlItem.Text = config.RemoteControlEnabled ? "Controle Remoto: Ativado" : "Controle Remoto: Desativado";
+            _remoteControlItem.Checked = config.RemoteControlEnabled;
+
+            var statusMsg = config.RemoteControlEnabled ? "ativado" : "desativado";
+            _notifyIcon.ShowBalloonTip(
+                3000,
+                "Synapse Remote",
+                $"Controle Remoto {statusMsg} com sucesso.",
+                ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Falha ao alterar estado do controle remoto: {ex.Message}", "Synapse Remote", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private async Task UpdateRemoteControlMenuAsync()
+    {
+        try
+        {
+            var configManager = new Synapse.Sync.Config.SynapseConfigManager();
+            var config = await configManager.LoadAsync();
+            _remoteControlItem.Text = config.RemoteControlEnabled ? "Controle Remoto: Ativado" : "Controle Remoto: Desativado";
+            _remoteControlItem.Checked = config.RemoteControlEnabled;
+        }
+        catch { }
+    }
+
     private async Task CheckInitialOnboardingAsync()
     {
         await PollStatusAsync();
+        await UpdateRemoteControlMenuAsync();
 
         var configManager = new Synapse.Sync.Config.SynapseConfigManager();
         var config = await configManager.LoadAsync();

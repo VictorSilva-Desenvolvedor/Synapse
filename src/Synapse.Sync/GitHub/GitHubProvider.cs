@@ -182,7 +182,7 @@ public sealed class GitHubProvider : ICloudProvider, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
 
         var normalizedPath = cloudFileId.Replace('\\', '/').TrimStart('/');
-        var url = BuildContentsUrl(normalizedPath);
+        var url = BuildContentsUrl(normalizedPath, isRead: true);
 
         var dir = Path.GetDirectoryName(destinationPath);
         if (!string.IsNullOrEmpty(dir))
@@ -428,7 +428,7 @@ public sealed class GitHubProvider : ICloudProvider, IDisposable
 
     private async Task<GitHubContentItem?> GetContentInternalAsync(string path, CancellationToken ct)
     {
-        var url = BuildContentsUrl(path);
+        var url = BuildContentsUrl(path, isRead: true);
         using var response = await SendAuthorizedRequestAsync(HttpMethod.Get, url, null, ct);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -461,10 +461,12 @@ public sealed class GitHubProvider : ICloudProvider, IDisposable
         return await _httpClient.SendAsync(request, ct);
     }
 
-    private string BuildContentsUrl(string path)
+    private string BuildContentsUrl(string path, bool isRead = false)
     {
         var cleanPath = path.Replace('\\', '/').TrimStart('/');
-        return $"{_config.BaseUrl.TrimEnd('/')}/repos/{_config.Owner}/{_config.Repository}/contents/{cleanPath}?ref={_config.Branch}";
+        return isRead
+            ? $"{_config.BaseUrl.TrimEnd('/')}/repos/{_config.Owner}/{_config.Repository}/contents/{cleanPath}?ref={_config.Branch}"
+            : $"{_config.BaseUrl.TrimEnd('/')}/repos/{_config.Owner}/{_config.Repository}/contents/{cleanPath}";
     }
 
     public void Dispose()

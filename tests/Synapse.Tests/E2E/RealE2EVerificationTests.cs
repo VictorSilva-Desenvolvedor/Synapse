@@ -19,6 +19,7 @@ namespace Synapse.Tests.E2E;
 /// <summary>
 /// Suíte de Validação Real Ponta a Ponta contra serviços reais, Named Pipe, HTTP, DPAPI e GitHub REST API.
 /// </summary>
+[Collection("RealE2E")]
 public class RealE2EVerificationTests : IDisposable
 {
     private readonly string _tempVaultDir;

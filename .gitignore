@@ -18,6 +18,7 @@ dist/
 packaging/inno/Output/
 .synapse/snapshots/
 plugins/obsidian-synapse/main.js
+/synapse-remote-pwa/
 
 # User-specific files
 *.rsuser

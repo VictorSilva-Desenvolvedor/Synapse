@@ -4,7 +4,7 @@ namespace Synapse.Sync;
 /// Separa o frontmatter YAML (delimitado por "---") do corpo de uma nota Markdown, e recompõe os dois -
 /// RF-CONFLICT.3 exige que o frontmatter seja parseado isoladamente do corpo antes do merge de texto.
 /// </summary>
-internal static class NoteContentSplitter
+public static class NoteContentSplitter
 {
     private const string Delimiter = "---";
 

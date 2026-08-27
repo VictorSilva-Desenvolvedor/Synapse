@@ -12,6 +12,11 @@ logs/
 
 # Saida do scripts/install.ps1 (publicacao self-contained, ADR-013)
 /publish/
+/dist/
+dist/
+**/dist/
+packaging/inno/Output/
+.synapse/snapshots/
 
 # User-specific files
 *.rsuser

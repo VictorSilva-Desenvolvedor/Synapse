@@ -1,4 +1,8 @@
 using System.Diagnostics;
+using Synapse.Agent;
+using Synapse.Sync.Auth;
+using Synapse.Sync.Config;
+using Synapse.Sync.GitHub;
 using Synapse.Tray.Ipc;
 using Timer = System.Windows.Forms.Timer;
 
@@ -19,6 +23,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly ToolStripMenuItem _openLogsItem;
     private readonly ToolStripMenuItem _exitItem;
     private readonly Timer _pollTimer;
+    private readonly CancellationTokenSource _remoteAgentCts = new();
 
     private IpcStatusPayload? _currentStatus;
     private bool _isDisposed;
@@ -232,12 +237,65 @@ public sealed class TrayApplicationContext : ApplicationContext
         await PollStatusAsync();
         await UpdateRemoteControlMenuAsync();
 
-        var configManager = new Synapse.Sync.Config.SynapseConfigManager();
+        var configManager = new SynapseConfigManager();
         var config = await configManager.LoadAsync();
 
         if (!config.IsConfigured)
         {
             OpenSettings();
+        }
+        else
+        {
+            _ = StartRemoteAgentAsync(config);
+        }
+    }
+
+    private async Task StartRemoteAgentAsync(SynapseConfig config)
+    {
+        try
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var dedicatedTokenPath = Path.Combine(appData, "Synapse", "remote_agent_token.dat");
+            var dedicatedStore = new DpapiTokenStore(dedicatedTokenPath);
+
+            var clientConfig = new GitHubClientConfig
+            {
+                Owner = config.Owner,
+                Repository = config.Repository,
+                Branch = string.IsNullOrWhiteSpace(config.Branch) ? "main" : config.Branch
+            };
+
+            var authManager = new GitHubAuthManager(dedicatedStore, clientConfig);
+            var tokenReady = await RemoteAgentTokenResolver.EnsureTokenAsync(authManager, dedicatedStore, _remoteAgentCts.Token);
+            if (!tokenReady)
+            {
+                return; // Sem token dedicado configurado ainda
+            }
+
+            var gitHubProvider = new GitHubProvider(authManager, clientConfig);
+            var configManager = new SynapseConfigManager();
+
+            var executor = new RemoteCommandExecutor(
+                () => configManager.LoadAsync().GetAwaiter().GetResult());
+
+            var auditLog = new RemoteAuditLog(config.VaultPath);
+
+            var pollingInterval = TimeSpan.FromSeconds(
+                config.RemoteControlPollingIntervalSeconds > 0
+                    ? config.RemoteControlPollingIntervalSeconds
+                    : 10);
+
+            var poller = new RemoteCommandPoller(
+                cloudProvider: gitHubProvider,
+                executor: executor,
+                auditLog: auditLog,
+                interval: pollingInterval);
+
+            _ = poller.RunAsync(_remoteAgentCts.Token);
+        }
+        catch
+        {
+            // Execução silenciosa em background
         }
     }
 
@@ -296,6 +354,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _pollTimer.Dispose();
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
+            _remoteAgentCts.Cancel();
+            _remoteAgentCts.Dispose();
             _ = _ipcClient.DisposeAsync();
         }
 

@@ -65,6 +65,40 @@ public sealed class GitHubProvider : ICloudProvider, IDisposable
             if (!response.IsSuccessStatusCode)
             {
                 var errorBody = await response.Content.ReadAsStringAsync(ct);
+
+                // Se o arquivo já existir no GitHub ("sha wasn't supplied"), recupera o SHA e reenvia
+                if (response.StatusCode == System.Net.HttpStatusCode.UnprocessableEntity && errorBody.Contains("sha", StringComparison.OrdinalIgnoreCase))
+                {
+                    var existingFile = await GetContentInternalAsync(relativePath, ct);
+                    if (existingFile?.Sha != null)
+                    {
+                        var retryPayload = new
+                        {
+                            message = $"Sync: atualizar {relativePath}",
+                            content = base64Content,
+                            sha = existingFile.Sha,
+                            branch = _config.Branch
+                        };
+                        using var retryResponse = await SendAuthorizedRequestAsync(
+                            HttpMethod.Put,
+                            url,
+                            new StringContent(JsonSerializer.Serialize(retryPayload), Encoding.UTF8, "application/json"),
+                            ct);
+
+                        if (retryResponse.IsSuccessStatusCode)
+                        {
+                            var retryBody = await retryResponse.Content.ReadAsStringAsync(ct);
+                            var retryRes = JsonSerializer.Deserialize<GitHubContentResponse>(retryBody);
+                            return new CloudFile(
+                                Id: retryRes?.Content?.Path ?? relativePath,
+                                Name: retryRes?.Content?.Name ?? fileName,
+                                Md5Checksum: retryRes?.Content?.Sha ?? string.Empty,
+                                ModifiedTime: DateTimeOffset.UtcNow,
+                                Trashed: false);
+                        }
+                    }
+                }
+
                 throw GitHubExceptionMapper.Map(response, errorBody);
             }
 

@@ -14,10 +14,12 @@ public sealed class ChatVaultForm : Form
     private readonly RichTextBox _txtHistory;
     private readonly TextBox _txtInput;
     private readonly Button _btnSend;
+    private readonly Button _btnSaveNote;
     private readonly ListView _lstSources;
     private readonly Label _lblStatus;
     private readonly SynapseConfigManager _configManager;
     private VaultRagEngine? _ragEngine;
+    private RagAnswer? _lastAnswer;
     private string _vaultPath = string.Empty;
 
     public ChatVaultForm(SynapseConfigManager? configManager = null)
@@ -110,7 +112,7 @@ public sealed class ChatVaultForm : Form
         var pnlFooter = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 65,
+            Height = 70,
             BackColor = Color.FromArgb(244, 244, 245),
             Padding = new Padding(16, 12, 16, 12)
         };
@@ -118,7 +120,7 @@ public sealed class ChatVaultForm : Form
         _txtInput = new TextBox
         {
             Location = new Point(16, 14),
-            Width = 660,
+            Width = 470,
             Font = new Font("Segoe UI", 10.5f, FontStyle.Regular)
         };
         _txtInput.KeyDown += async (_, e) =>
@@ -133,8 +135,8 @@ public sealed class ChatVaultForm : Form
         _btnSend = new Button
         {
             Text = "Perguntar ao Cofre",
-            Location = new Point(685, 12),
-            Width = 165,
+            Location = new Point(496, 12),
+            Width = 160,
             Height = 35,
             BackColor = Color.FromArgb(59, 130, 246),
             ForeColor = Color.White,
@@ -143,17 +145,32 @@ public sealed class ChatVaultForm : Form
         };
         _btnSend.Click += async (_, _) => await SendQuestionAsync();
 
+        _btnSaveNote = new Button
+        {
+            Text = "💾 Salvar como Nota",
+            Location = new Point(666, 12),
+            Width = 180,
+            Height = 35,
+            BackColor = Color.FromArgb(16, 185, 129),
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            Enabled = false
+        };
+        _btnSaveNote.Click += async (_, _) => await SaveAnswerAsNoteAsync();
+
         _lblStatus = new Label
         {
             Text = "Inicializando índice semântico...",
             ForeColor = Color.DimGray,
-            Location = new Point(16, 44),
+            Location = new Point(16, 48),
             AutoSize = true,
             Font = new Font("Segoe UI", 8.5f, FontStyle.Regular)
         };
 
         pnlFooter.Controls.Add(_txtInput);
         pnlFooter.Controls.Add(_btnSend);
+        pnlFooter.Controls.Add(_btnSaveNote);
         pnlFooter.Controls.Add(_lblStatus);
         Controls.Add(pnlFooter);
 
@@ -196,6 +213,7 @@ public sealed class ChatVaultForm : Form
 
         _txtInput.Text = "";
         _btnSend.Enabled = false;
+        _btnSaveNote.Enabled = false;
         _lblStatus.Text = "Pesquisando no cofre e gerando resposta...";
 
         AppendMessage("Você", question);
@@ -204,8 +222,10 @@ public sealed class ChatVaultForm : Form
         {
             var answer = await Task.Run(async () => await _ragEngine.AskVaultAsync(question, _vaultPath));
 
+            _lastAnswer = answer;
             AppendMessage("Synapse Brain", answer.Answer);
             UpdateSourcesList(answer.Sources);
+            _btnSaveNote.Enabled = true;
             _lblStatus.Text = "Pronto.";
         }
         catch (Exception ex)
@@ -217,6 +237,32 @@ public sealed class ChatVaultForm : Form
         {
             _btnSend.Enabled = true;
             _txtInput.Focus();
+        }
+    }
+
+    private async Task SaveAnswerAsNoteAsync()
+    {
+        if (_lastAnswer == null || _ragEngine == null || string.IsNullOrWhiteSpace(_vaultPath)) return;
+
+        _btnSaveNote.Enabled = false;
+        _lblStatus.Text = "Salvando resposta como nota no cofre...";
+
+        try
+        {
+            var relativePath = await Task.Run(async () =>
+                await _ragEngine.SaveAnswerAsNoteAsync(_lastAnswer, _vaultPath));
+
+            AppendMessage("Sistema", $"💾 Resposta salva com sucesso no cofre: [[{relativePath}]]");
+            _lblStatus.Text = $"Nota salva em {relativePath}";
+        }
+        catch (Exception ex)
+        {
+            AppendMessage("Sistema", $"⚠️ Erro ao salvar nota no cofre: {ex.Message}");
+            _lblStatus.Text = "Erro ao salvar nota.";
+        }
+        finally
+        {
+            _btnSaveNote.Enabled = _lastAnswer != null;
         }
     }
 

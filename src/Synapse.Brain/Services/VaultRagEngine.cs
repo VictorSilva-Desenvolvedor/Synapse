@@ -148,6 +148,81 @@ Pergunta do usuário:
         return new RagAnswer(question, answer, topNotes);
     }
 
+    public async Task<string> SaveAnswerAsNoteAsync(
+        RagAnswer answer,
+        string vaultRootPath,
+        string targetSubFolder = "Brain/Conversas",
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(answer);
+        ArgumentException.ThrowIfNullOrWhiteSpace(vaultRootPath);
+
+        // 1. Constrói o conteúdo Markdown com frontmatter estruturado
+        var fullNoteMarkdown = BuildAnswerNote(answer);
+
+        // 2. Sanitiza e trunca o título a partir da pergunta (máximo ~80 caracteres)
+        var sanitizedTitle = SanitizeQuestionFileName(answer.Question);
+
+        var targetDir = Path.Combine(vaultRootPath, targetSubFolder);
+        Directory.CreateDirectory(targetDir);
+
+        var targetFilePath = Path.Combine(targetDir, $"{sanitizedTitle}.md");
+
+        // 3. Se o arquivo já existir, anexa sufixo numérico
+        var count = 1;
+        while (File.Exists(targetFilePath))
+        {
+            targetFilePath = Path.Combine(targetDir, $"{sanitizedTitle} ({count++}).md");
+        }
+
+        // 4. Grava a nota no disco do cofre
+        await File.WriteAllTextAsync(targetFilePath, fullNoteMarkdown, Encoding.UTF8, ct);
+
+        return Path.GetRelativePath(vaultRootPath, targetFilePath).Replace('\\', '/');
+    }
+
+    private static string BuildAnswerNote(RagAnswer answer)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("---");
+        sb.AppendLine($"titulo: \"{answer.Question.Replace("\"", "\\\"")}\"");
+        sb.AppendLine("categoria: \"Chat com o Cofre\"");
+        sb.AppendLine($"criado_em: \"{DateTime.Now:yyyy-MM-dd HH:mm:ss}\"");
+        sb.AppendLine("status: processado");
+        sb.AppendLine("tags:");
+        sb.AppendLine("  - chat-cofre");
+        sb.AppendLine("---");
+        sb.AppendLine();
+        sb.AppendLine($"# {answer.Question}");
+        sb.AppendLine();
+        sb.AppendLine(answer.Answer.Trim());
+
+        if (answer.Sources.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("### Fontes Consultadas");
+            foreach (var src in answer.Sources)
+            {
+                sb.AppendLine($"- [[{src.Title}]]");
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static string SanitizeQuestionFileName(string question)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var sanitized = string.Concat(question.Where(c => !invalid.Contains(c))).Trim();
+
+        if (sanitized.Length > 80)
+        {
+            sanitized = sanitized[..80].Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(sanitized) ? "Resposta-Chat" : sanitized;
+    }
+
     private static string ComputeSha256(string content)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));

@@ -13,7 +13,7 @@ public sealed class GeminiEmbeddingProvider : IEmbeddingProvider
     private readonly HttpClient _httpClient;
     private readonly BrainConfig _config;
 
-    public string ModelName => "text-embedding-004";
+    public string ModelName => "gemini-embedding-001";
 
     public GeminiEmbeddingProvider(BrainConfig config, HttpClient? httpClient = null)
     {
@@ -36,7 +36,7 @@ public sealed class GeminiEmbeddingProvider : IEmbeddingProvider
 
         var requestBody = new
         {
-            model = "models/text-embedding-004",
+            model = "models/gemini-embedding-001",
             content = new
             {
                 parts = new[]
@@ -46,7 +46,7 @@ public sealed class GeminiEmbeddingProvider : IEmbeddingProvider
             }
         };
 
-        var url = $"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={apiKey}";
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={apiKey}";
 
         try
         {

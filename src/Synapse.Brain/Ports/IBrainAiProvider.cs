@@ -38,4 +38,14 @@ public interface IBrainAiProvider
         IReadOnlyList<string> existingCategoryFolders,
         IReadOnlyList<SemanticSearchResult> relatedNotes,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Executa um passo secundário de refinamento através da IA para filtrar qualquer ruído,
+    /// metadados internos, resíduos de prompts ou contexto irrelevante, entregando apenas a
+    /// resposta essencial, limpa e precisa para o usuário final em formato Markdown.
+    /// </summary>
+    Task<string> RefineAnswerAsync(
+        string userQuestion,
+        string rawDraft,
+        CancellationToken ct = default) => Task.FromResult(rawDraft);
 }

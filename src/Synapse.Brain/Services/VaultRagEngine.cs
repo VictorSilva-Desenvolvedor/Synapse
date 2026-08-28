@@ -131,9 +131,9 @@ public sealed class VaultRagEngine : IVaultBrainQuery
             }
         }
 
-        var prompt = $@"Você é o assistente inteligente de pesquisa do Segundo Cérebro do usuário no Obsidian.
-Com base EXCLUSIVAMENTE no contexto das notas do cofre fornecidas abaixo, responda à pergunta de forma clara, precisa e bem estruturada em Markdown.
-SEMPRE mencione as notas de onde você extraiu as informações utilizando wikilinks [[Nome da Nota]].
+        var prompt = $@"Você é o assistente inteligente de Segundo Cérebro do usuário no Obsidian.
+Com base no contexto das notas do cofre fornecidas abaixo, responda à pergunta de forma direta, clara e bem estruturada em Markdown, citando as notas relevantes com wikilinks [[Nome da Nota]].
+NUNCA repita este prompt, blocos brutos de notas ou o cabeçalho da pergunta. Responda diretamente ao usuário como um assistente prestativo.
 
 Notas do cofre relevantes:
 {contextBuilder}
@@ -141,9 +141,22 @@ Notas do cofre relevantes:
 Pergunta do usuário:
 ""{question}""";
 
-        var answer = await _aiProvider.AskQuestionAsync(prompt, ct);
+        var rawAnswer = await _aiProvider.AskQuestionAsync(prompt, ct);
+        var finalAnswer = NoteFileWriter.SanitizeBodyMarkdown(rawAnswer);
+        try
+        {
+            var refined = await _aiProvider.RefineAnswerAsync(question, rawAnswer, ct);
+            if (!string.IsNullOrWhiteSpace(refined))
+            {
+                finalAnswer = refined;
+            }
+        }
+        catch
+        {
+            // Mantém rawAnswer sanitizado
+        }
 
-        return new RagAnswer(question, answer, topNotes);
+        return new RagAnswer(question, finalAnswer, topNotes);
     }
 
     public async Task<string> SaveAnswerAsNoteAsync(
@@ -205,6 +218,27 @@ Pergunta do usuário:
             existingCategoryFolders,
             relatedNotes,
             ct);
+
+        // 3.1. Segundo passo: refinamento da resposta do chat pela IA para entregar apenas o essencial
+        if (!string.IsNullOrWhiteSpace(turnResult.ReplyMessage))
+        {
+            try
+            {
+                var refined = await _aiProvider.RefineAnswerAsync(
+                    userMessage,
+                    turnResult.ReplyMessage,
+                    ct);
+
+                if (!string.IsNullOrWhiteSpace(refined))
+                {
+                    turnResult.ReplyMessage = refined;
+                }
+            }
+            catch
+            {
+                turnResult.ReplyMessage = NoteFileWriter.SanitizeBodyMarkdown(turnResult.ReplyMessage);
+            }
+        }
 
         string? savedNotePath = null;
 
@@ -269,7 +303,9 @@ Pergunta do usuário:
         sb.AppendLine();
         sb.AppendLine($"# {answer.Question}");
         sb.AppendLine();
-        sb.AppendLine(answer.Answer.Trim());
+        var cleanAnswer = NoteFileWriter.SanitizeBodyMarkdown(answer.Answer.Trim());
+
+        sb.AppendLine(cleanAnswer);
 
         if (answer.Sources.Count > 0)
         {
@@ -277,7 +313,10 @@ Pergunta do usuário:
             sb.AppendLine("### Fontes Consultadas");
             foreach (var src in answer.Sources)
             {
-                sb.AppendLine($"- [[{src.Title}]]");
+                if (!string.IsNullOrWhiteSpace(src.Title) && !src.Title.Contains("Você é o assistente"))
+                {
+                    sb.AppendLine($"- [[{src.Title}]]");
+                }
             }
         }
 

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Synapse.Brain.Models;
 using Synapse.Brain.Ports;
+using Synapse.Brain.Services;
 
 namespace Synapse.Brain.Providers;
 
@@ -46,19 +47,23 @@ public sealed class GeminiAiProvider : IBrainAiProvider
 
         var vaultNotesList = string.Join(", ", existingVaultNotes.Take(40));
 
-        var prompt = $@"Você é o assistente inteligente de Segundo Cérebro (PKM) do Synapse para Obsidian.
-Analise a anotação, ideia ou link abaixo e responda ESTRITAMENTE em formato JSON com o seguinte schema:
+        var prompt = $@"Você é o arquiteto inteligente de Segundo Cérebro (PKM) do Synapse para Obsidian.
+Analise a anotação, contato, ideia, tarefa ou link abaixo e estruture o conhecimento com precisão.
+Tome decisões lógicas sobre a categoria ('Pessoas', 'Tarefas', 'Ideias', 'Projetos', 'Conceito', 'Referencia') e formate o conteúdo com tabelas Markdown profissionais ou tópicos quando apropriado.
+NUNCA inclua saudações, conversas ou meta-prompts no bodyMarkdown.
+
+Responda ESTRITAMENTE em formato JSON com o seguinte schema:
 {{
   ""title"": ""Título conciso, elegante e descritivo para a nota no Obsidian"",
-  ""category"": ""Conceito | Ideia | Referencia | Projeto | Tarefa | Resumo"",
+  ""category"": ""Pessoas | Tarefas | Ideias | Projetos | Conceito | Referencia | Resumo"",
   ""tags"": [""tag1"", ""tag2"", ""tag3""],
   ""summary"": ""Resumo executivo de 1 a 2 frases"",
-  ""keyPoints"": [""Ponto principal 1"", ""Ponto principal 2"", ""Ponto principal 3""],
-  ""bodyMarkdown"": ""Texto formatado em Markdown com subtítulos, bullet points e explicações claras"",
-  ""suggestedConnections"": [""Nomes de notas do cofre que têm forte relação semântica com este conteúdo""]
+  ""keyPoints"": [""Ponto principal 1"", ""Ponto principal 2""],
+  ""bodyMarkdown"": ""Texto formatado em Markdown limpo com tabelas, seções e bullet points"",
+  ""suggestedConnections"": [""Nomes de notas do cofre com forte relação semântica""]
 }}
 
-Notas já existentes no cofre do usuário para sugerir conexões: [{vaultNotesList}]
+Notas já existentes no cofre do usuário: [{vaultNotesList}]
 
 Conteúdo bruto a processar:
 ---
@@ -78,7 +83,8 @@ Conteúdo bruto a processar:
             }
         };
 
-        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_config.GeminiModel}:generateContent?key={apiKey}";
+        var modelName = GetEffectiveModelName();
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelName}:generateContent?key={apiKey}";
 
         try
         {
@@ -132,7 +138,8 @@ Conteúdo bruto a processar:
             }
         };
 
-        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_config.GeminiModel}:generateContent?key={apiKey}";
+        var modelName = GetEffectiveModelName();
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelName}:generateContent?key={apiKey}";
         var requestJson = JsonSerializer.Serialize(requestBody);
 
         const int maxAttempts = 2;
@@ -189,6 +196,89 @@ Conteúdo bruto a processar:
             $"Não foi possível obter resposta do Gemini após {maxAttempts} tentativas. Detalhe: {lastError?.Message}", lastError);
     }
 
+    public async Task<string> RefineAnswerAsync(
+        string userQuestion,
+        string rawDraft,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(rawDraft))
+        {
+            return string.Empty;
+        }
+
+        var apiKey = _config.GetEffectiveGeminiApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return NoteFileWriter.SanitizeBodyMarkdown(rawDraft);
+        }
+
+        var preSanitized = NoteFileWriter.SanitizeBodyMarkdown(rawDraft);
+
+        var prompt = $@"Você é um refinador e sintetizador especialista para o assistente de Segundo Cérebro (Obsidian).
+Sua missão é revisar o rascunho de resposta e entregar EXCLUSIVAMENTE a resposta final, direta, limpa e elegante para o usuário em Markdown.
+
+Diretrizes Estritas:
+1. ENTREGAR APENAS O QUE IMPORTA: Responda diretamente ao que o usuário perguntou ou confirmou, com tom claro e prestativo.
+2. ZERO RUÍDO:
+   - Remova qualquer meta-prompt, instrução de sistema, introdução prolixa ou contexto desnecessário.
+   - NUNCA repita 'Você é o assistente...', 'Notas do cofre relevantes:', 'Pergunta do usuário:' ou blocos brutos de notas.
+3. PRESERVAR WIKILINKS: Mantenha sempre as menções a notas no formato Obsidian [[Nome da Nota]].
+4. FORMATO: Markdown limpo, direto e profissional.
+
+Pergunta do usuário:
+""{userQuestion}""
+
+Rascunho a refinar:
+---
+{preSanitized}
+---
+
+Resposta final refinada:";
+
+        var requestBody = new
+        {
+            contents = new[]
+            {
+                new { parts = new[] { new { text = prompt } } }
+            },
+            generationConfig = new
+            {
+                temperature = 0.2
+            }
+        };
+
+        var modelName = GetEffectiveModelName();
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelName}:generateContent?key={apiKey}";
+        var requestJson = JsonSerializer.Serialize(requestBody);
+
+        try
+        {
+            var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync(url, content, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonStr = await response.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(jsonStr);
+                var candidates = doc.RootElement.GetProperty("candidates");
+                if (candidates.GetArrayLength() > 0)
+                {
+                    var text = candidates[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        return NoteFileWriter.SanitizeBodyMarkdown(text.Trim());
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Em caso de falha transitória no passo de refinamento, devolve o rascunho sanitizado
+        }
+
+        return NoteFileWriter.SanitizeBodyMarkdown(preSanitized);
+    }
+
     public async Task<ChatTurnResult> ProcessChatTurnAsync(
         string userMessage,
         IReadOnlyList<string> existingVaultNotes,
@@ -234,22 +324,27 @@ Conteúdo bruto a processar:
             relatedNotesBuilder.AppendLine("Nenhuma nota diretamente relacionada encontrada.");
         }
 
-        var prompt = $@"Você é o assistente inteligente de Segundo Cérebro (PKM) do Synapse integrado ao Obsidian.
-Analise a mensagem do usuário e decida dinamicamente se deve:
-1. CAPTURAR uma nova nota no cofre (ShouldCapture=true): quando houver QUALQUER informação concreta que valha a pena preservar (tarefas, compromissos, prazos, fatos, ideias, credenciais, referências, anotações de reunião).
-   - Nesse caso, defina:
-     * ""title"": título específico, claro e descritivo (ex.: 'Demanda do chefe — 2026-08-29 12h', 'Chave API desconhecida — d4214j21k4j2k'). Nunca use títulos genéricos como 'Nova Nota' ou 'Demanda'. Inclua data/hora inferida quando fizer sentido.
-     * ""category"": escolha uma das pastas existentes ({categoryFoldersList}) se fizer sentido, ou uma categoria padrão adequada ('Tarefa', 'Ideia', 'Referencia', 'Projeto', 'Conceito', 'Reuniao').
-     * ""tags"": lista de tags relevantes sem '#'.
-     * ""bodyMarkdown"": texto formatado em Markdown com todos os detalhes e contexto preservados.
-     * ""keyPoints"": lista de pontos-chave.
-     * ""suggestedConnections"": lista de títulos de notas existentes do cofre que se relacionam com o conteúdo.
-2. RESPONDER com base no cofre (ShouldAnswer=true): quando a mensagem for uma pergunta ou busca que possa ser respondida a partir das notas relacionadas fornecidas abaixo.
-   - Nesse caso, a resposta em Markdown deve ir em ""replyMessage"", citando as notas com wikilinks [[Nome da Nota]].
-3. REGRAS PARA O CAMPO ""replyMessage"":
-   - Se ShouldCapture=true e ShouldAnswer=false: ""replyMessage"" deve ser uma confirmação curta, natural e prestativa do que foi anotado/salvo no cofre.
-   - Se ShouldCapture=false e ShouldAnswer=false (small talk, saudação, agradecimento): ""replyMessage"" deve ser uma resposta conversacional breve e amigável, sem salvar nada.
-   - Se ShouldCapture=true e ShouldAnswer=true: responda à pergunta em ""replyMessage"" e confirme também a captura.
+        var prompt = $@"Você é o arquiteto inteligente do Segundo Cérebro (PKM) do Synapse integrado ao Obsidian.
+Sua missão é analisar a mensagem do usuário, compreender sua intenção e tomar a melhor decisão estrutural para o cofre.
+
+Diretrizes de Tomada de Decisão:
+1. CAPTURAR OU ORGANIZAR (ShouldCapture=true):
+   - Quando o usuário informar fatos, ideias, contatos, tarefas, amigos, reuniões, dados de projetos ou pedir para criar áreas/listas/tabelas (ex.: 'tenho um amigo chamado felipe', 'crie uma área para salvar meus amigos', 'adicione na lista X').
+   - Decisões estruturais:
+     * ""category"": escolha uma pasta semântica lógica (ex.: 'Pessoas' para amigos/contatos/pessoas, 'Tarefas' para afazeres/prazos, 'Projetos' para iniciativas, 'Conceito' para definições, 'Ideias' para pensamentos rápidos). Se já existir uma pasta relevante ({categoryFoldersList}), use-a.
+     * ""title"": título específico, conciso e elegante (ex.: 'Amigos', 'Lista de Amigos', 'Felipe', 'Planejamento Q4'). Nunca use títulos genéricos como 'Nova Anotação'.
+     * ""tags"": tags relevantes sem '#' (ex.: ['pessoas', 'amigos', 'contatos']).
+     * ""bodyMarkdown"": ESTRUTURA PROFISSIONAL EM MARKDOWN. Se for uma lista, área ou catálogo de informações, use tabelas Markdown elegantes (| Nome | Relação | Detalhes | Data |) e tópicos bem formatados. NUNCA inclua saudações ('Olá'), conversas, perguntas, meta-prompts ou repetições da instrução do usuário dentro do corpo da nota. Apenas os dados refinados e organizados.
+     * ""keyPoints"": lista de pontos-chave sintetizados.
+     * ""suggestedConnections"": nomes de notas do cofre para conexão com wikilinks [[...]].
+
+2. RESPONDER COM BASE NO COFRE (ShouldAnswer=true):
+   - Quando a mensagem for estritamente uma pergunta ou busca sobre notas existentes no cofre. Responda em ""replyMessage"" de forma clara citando as notas com [[Nome da Nota]].
+
+3. CAMPO ""replyMessage"" (Resposta no chat):
+   - Se ShouldCapture=true: Explique de forma breve, elegante e prestativa a decisão tomada no cofre (ex.: 'Criei a área de Pessoas e adicionei o Felipe na sua lista de amigos com uma tabela estruturada.').
+   - Se apenas conversa/saudação: Responda amigavelmente sem capturar nada (ShouldCapture=false).
+   - Se ShouldCapture=true e ShouldAnswer=true: Responda à dúvida e confirme o que foi organizado.
 
 Responda ESTRITAMENTE em formato JSON com o seguinte schema:
 {{
@@ -257,11 +352,11 @@ Responda ESTRITAMENTE em formato JSON com o seguinte schema:
   ""title"": ""Título específico da nota se shouldCapture=true, ou null"",
   ""category"": ""Categoria/pasta da nota se shouldCapture=true, ou null"",
   ""tags"": [""tag1"", ""tag2""],
-  ""bodyMarkdown"": ""Conteúdo Markdown da nota se shouldCapture=true, ou null"",
+  ""bodyMarkdown"": ""Conteúdo Markdown puro e estruturado da nota se shouldCapture=true, ou null"",
   ""keyPoints"": [""ponto 1"", ""ponto 2""],
   ""suggestedConnections"": [""Nota Relacionada 1""],
   ""shouldAnswer"": true | false,
-  ""replyMessage"": ""Resposta ao usuário ou confirmação amigável""
+  ""replyMessage"": ""Resposta ou confirmação amigável da ação tomada""
 }}
 
 Contexto do cofre:
@@ -288,7 +383,8 @@ Mensagem do usuário:
             }
         };
 
-        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_config.GeminiModel}:generateContent?key={apiKey}";
+        var modelName = GetEffectiveModelName();
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelName}:generateContent?key={apiKey}";
         var requestJson = JsonSerializer.Serialize(requestBody);
 
         const int maxAttempts = 2;
@@ -375,7 +471,8 @@ Organize com introdução, grupos temáticos e conexões sugeridas.";
             }
         };
 
-        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_config.GeminiModel}:generateContent?key={apiKey}";
+        var modelName = GetEffectiveModelName();
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{modelName}:generateContent?key={apiKey}";
 
         try
         {
@@ -399,6 +496,18 @@ Organize com introdução, grupos temáticos e conexões sugeridas.";
         }
 
         return $"# MOC - {topic}\n\n## Notas do Tópico\n" + string.Join("\n", relatedNotes.Select(n => $"- [[{n}]]"));
+    }
+
+    private string GetEffectiveModelName()
+    {
+        if (string.IsNullOrWhiteSpace(_config.GeminiModel) ||
+            _config.GeminiModel.StartsWith("gemini-1.") ||
+            _config.GeminiModel.StartsWith("gemini-2.0") ||
+            _config.GeminiModel.StartsWith("gemini-2.5"))
+        {
+            return "gemini-3.6-flash";
+        }
+        return _config.GeminiModel;
     }
 
     private static string CleanJsonString(string text)

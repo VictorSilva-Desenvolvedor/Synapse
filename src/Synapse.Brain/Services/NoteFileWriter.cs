@@ -20,6 +20,7 @@ public static class NoteFileWriter
         ArgumentNullException.ThrowIfNull(config);
 
         var body = structured.BodyMarkdown ?? string.Empty;
+        body = SanitizeBodyMarkdown(body);
         if (config.EnableAutoLinking)
         {
             if (existingNotes != null && existingNotes.Count > 0)
@@ -90,7 +91,13 @@ public static class NoteFileWriter
             sb.AppendLine();
         }
 
-        sb.AppendLine(body.Trim());
+        var trimmedBody = body.Trim();
+        if (trimmedBody.StartsWith($"# {structured.Title}", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmedBody = trimmedBody[$"# {structured.Title}".Length..].TrimStart('\r', '\n');
+        }
+
+        sb.AppendLine(trimmedBody);
 
         return sb.ToString();
     }
@@ -139,5 +146,34 @@ public static class NoteFileWriter
         var invalid = Path.GetInvalidFileNameChars();
         var sanitized = string.Concat(name.Where(c => !invalid.Contains(c))).Trim();
         return string.IsNullOrWhiteSpace(sanitized) ? "Nota" : sanitized;
+    }
+
+    public static string SanitizeBodyMarkdown(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return string.Empty;
+
+        var lines = body.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
+        var cleanLines = new List<string>();
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+            if (line.StartsWith("--- INÍCIO DA NOTA", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("--- FIM DA NOTA", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("Você é o assistente", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("Você é o arquiteto", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("Com base EXCLUSIVAMENTE", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("SEMPRE mencione as notas", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("Notas do cofre relevantes:", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("Pergunta do usuário:", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("### Fontes Consultadas", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            cleanLines.Add(rawLine);
+        }
+
+        return string.Join("\n", cleanLines).Trim();
     }
 }

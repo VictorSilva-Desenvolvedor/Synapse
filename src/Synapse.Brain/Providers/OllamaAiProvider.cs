@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Synapse.Brain.Models;
 using Synapse.Brain.Ports;
+using Synapse.Brain.Services;
 
 namespace Synapse.Brain.Providers;
 
@@ -127,6 +128,45 @@ Entrada bruta do usuário:
         {
             throw new InvalidOperationException(
                 $"Não foi possível contatar o Ollama em {_config.OllamaEndpoint}. Verifique se o serviço está rodando. Detalhe: {ex.Message}", ex);
+        }
+    }
+
+    public async Task<string> RefineAnswerAsync(
+        string userQuestion,
+        string rawDraft,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(rawDraft)) return string.Empty;
+
+        var preSanitized = NoteFileWriter.SanitizeBodyMarkdown(rawDraft);
+
+        var prompt = $@"Você é um refinador e sintetizador especialista para o assistente de Segundo Cérebro (Obsidian).
+Sua missão é revisar o rascunho de resposta e entregar EXCLUSIVAMENTE a resposta final, direta, limpa e elegante para o usuário em Markdown.
+
+Diretrizes Estritas:
+1. ENTREGAR APENAS O QUE IMPORTA: Responda diretamente ao que o usuário perguntou ou confirmou.
+2. ZERO RUÍDO: Remova qualquer meta-prompt, instrução de sistema ou dump de notas não solicitadas.
+3. PRESERVAR WIKILINKS: Mantenha sempre as menções a notas no formato Obsidian [[Nome da Nota]].
+4. FORMATO: Markdown limpo, direto e profissional.
+
+Pergunta do usuário:
+""{userQuestion}""
+
+Rascunho a refinar:
+---
+{preSanitized}
+---
+
+Resposta final refinada:";
+
+        try
+        {
+            var refined = await AskQuestionAsync(prompt, ct);
+            return NoteFileWriter.SanitizeBodyMarkdown(refined.Trim());
+        }
+        catch
+        {
+            return NoteFileWriter.SanitizeBodyMarkdown(preSanitized);
         }
     }
 

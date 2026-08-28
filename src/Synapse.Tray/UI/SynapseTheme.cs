@@ -51,6 +51,11 @@ public static class SynapseTheme
     /// <summary>Aplica o pano de fundo escuro padrão a uma janela.</summary>
     public static void ApplyFormChrome(Form form)
     {
+        // Layouts usam coordenadas em pixel fixas; AutoScaleMode.Font (padrão) reescala
+        // de forma não-uniforme conforme a métrica da fonte ambiente e pode desalinhar/
+        // sobrepor controles em DPIs diferentes do monitor de desenvolvimento. Dpi escala
+        // de forma previsível e uniforme por um único fator.
+        form.AutoScaleMode = AutoScaleMode.Dpi;
         form.BackColor = Background;
         form.ForeColor = TextPrimary;
         form.Font = FontBody();

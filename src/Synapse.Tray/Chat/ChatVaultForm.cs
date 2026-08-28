@@ -102,10 +102,34 @@ public sealed class ChatVaultForm : Form
             Padding = new Padding(16, 12, 16, 12)
         };
 
+        _btnSaveNote = new SynapseButton
+        {
+            Text = "💾 Salvar como Nota",
+            Width = 180,
+            Height = 36,
+            Variant = SynapseButtonVariant.Primary,
+            Enabled = false,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+        _btnSaveNote.Location = new Point(pnlFooter.Width - _btnSaveNote.Width - 16, 12);
+        _btnSaveNote.Click += async (_, _) => await SaveAnswerAsNoteAsync();
+
+        _btnSend = new SynapseButton
+        {
+            Text = "Perguntar ao Cofre",
+            Width = 160,
+            Height = 36,
+            Variant = SynapseButtonVariant.Secondary,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+        _btnSend.Location = new Point(_btnSaveNote.Left - _btnSend.Width - 10, 12);
+        _btnSend.Click += async (_, _) => await SendQuestionAsync();
+
         _txtInput = new TextBox
         {
             Location = new Point(16, 14),
-            Width = 470,
+            Width = _btnSend.Left - 16 - 10,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
             Font = new Font(SynapseTheme.FontFamily, 10.5f, FontStyle.Regular)
         };
         SynapseTheme.StyleInput(_txtInput);
@@ -117,27 +141,6 @@ public sealed class ChatVaultForm : Form
                 await SendQuestionAsync();
             }
         };
-
-        _btnSend = new SynapseButton
-        {
-            Text = "Perguntar ao Cofre",
-            Location = new Point(496, 12),
-            Width = 160,
-            Height = 36,
-            Variant = SynapseButtonVariant.Secondary
-        };
-        _btnSend.Click += async (_, _) => await SendQuestionAsync();
-
-        _btnSaveNote = new SynapseButton
-        {
-            Text = "💾 Salvar como Nota",
-            Location = new Point(666, 12),
-            Width = 180,
-            Height = 36,
-            Variant = SynapseButtonVariant.Primary,
-            Enabled = false
-        };
-        _btnSaveNote.Click += async (_, _) => await SaveAnswerAsNoteAsync();
 
         _lblStatus = new Label
         {
@@ -257,6 +260,10 @@ public sealed class ChatVaultForm : Form
         _txtHistory.SelectionColor = SynapseTheme.TextPrimary;
         _txtHistory.AppendText($"{message}\n\n");
 
+        // RichTextBox.AppendText deixa o trecho recém-inserido "selecionado" internamente,
+        // o que renderiza como um destaque azul permanente sobre o texto — precisa colapsar
+        // a seleção de volta para o fim antes de repintar.
+        _txtHistory.Select(_txtHistory.TextLength, 0);
         _txtHistory.ScrollToCaret();
     }
 

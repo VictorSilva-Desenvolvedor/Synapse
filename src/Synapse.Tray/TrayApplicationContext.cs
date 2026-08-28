@@ -9,6 +9,7 @@ using Synapse.Sync.Config;
 using Synapse.Sync.GitHub;
 using Synapse.Tray.Agent;
 using Synapse.Tray.Ipc;
+using Synapse.Tray.UI;
 using Timer = System.Windows.Forms.Timer;
 
 namespace Synapse.Tray;
@@ -37,11 +38,19 @@ public sealed class TrayApplicationContext : ApplicationContext
     {
         _ipcClient = ipcClient ?? new IpcClient();
 
-        var contextMenu = new ContextMenuStrip();
+        var contextMenu = new ContextMenuStrip
+        {
+            Renderer = new SynapseMenuRenderer(),
+            BackColor = SynapseTheme.SurfaceAlt,
+            ForeColor = SynapseTheme.TextPrimary,
+            Font = new Font(SynapseTheme.FontFamily, 9f),
+            ShowImageMargin = false
+        };
 
         _statusHeaderItem = new ToolStripMenuItem("Status: Conectando...")
         {
             Enabled = false,
+            ForeColor = SynapseTheme.AccentPrimary,
             Font = new Font(contextMenu.Font, FontStyle.Bold)
         };
 

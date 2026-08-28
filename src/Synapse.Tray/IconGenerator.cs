@@ -45,7 +45,7 @@ public static class IconGenerator
         return estado switch
         {
             "Sincronizado" => CreateStatusIcon(Color.FromArgb(16, 185, 129)), // Emerald
-            "Sincronizando" => CreateStatusIcon(Color.FromArgb(59, 130, 246), Color.FromArgb(147, 197, 253)), // Blue pulse
+            "Sincronizando" => CreateStatusIcon(Color.FromArgb(99, 102, 241), Color.FromArgb(199, 200, 250)), // Indigo pulse (acento secundário)
             "Offline" => CreateStatusIcon(Color.FromArgb(245, 158, 11)), // Amber
             "AuthRequired" => CreateStatusIcon(Color.FromArgb(239, 68, 68), Color.FromArgb(254, 202, 202)), // Red pulse
             "Erro" => CreateStatusIcon(Color.FromArgb(239, 68, 68)), // Red

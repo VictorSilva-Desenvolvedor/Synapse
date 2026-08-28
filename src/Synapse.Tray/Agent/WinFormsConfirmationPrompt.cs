@@ -1,5 +1,6 @@
 using Synapse.Agent;
 using Synapse.Agent.Models;
+using Synapse.Tray.UI;
 using Timer = System.Windows.Forms.Timer;
 
 namespace Synapse.Tray.Agent;
@@ -96,60 +97,56 @@ public sealed class WinFormsConfirmationPrompt : IRemoteConfirmationPrompt
 
             Text = "Synapse Remote — Solicitação de Ação Sensível";
             Width = 520;
-            Height = 320;
+            Height = 340;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             TopMost = true;
             ShowInTaskbar = true;
+            SynapseTheme.ApplyFormChrome(this);
 
-            var titleLabel = new Label
-            {
-                Text = "Autorização de Controle Remoto",
-                Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                Location = new Point(20, 15),
-                AutoSize = true
-            };
+            var pnlHeader = SynapseTheme.CreateHeaderBar(
+                "⚠️ Autorização de Controle Remoto",
+                "Uma ação sensível foi solicitada por um dispositivo remoto",
+                52);
+            Controls.Add(pnlHeader);
 
             var description = GetCommandDescription(command);
             var descTextBox = new TextBox
             {
                 Text = description,
-                Location = new Point(20, 50),
-                Width = 460,
-                Height = 140,
+                Location = new Point(20, 66),
+                Width = 468,
+                Height = 150,
                 Multiline = true,
                 ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical,
-                BackColor = SystemColors.Window
+                BorderStyle = BorderStyle.FixedSingle
             };
+            SynapseTheme.StyleInput(descTextBox);
 
-            _timerLabel = new Label
-            {
-                Text = $"Tempo restante para resposta: {_secondsRemaining}s (negará automaticamente)",
-                Location = new Point(20, 205),
-                Width = 460,
-                ForeColor = Color.DarkRed,
-                Font = new Font("Segoe UI", 9, FontStyle.Italic)
-            };
+            _timerLabel = SynapseTheme.CreateStatusBadge($"⏱ {_secondsRemaining}s — negará automaticamente", SynapseTheme.Warning);
+            _timerLabel.Location = new Point(20, 226);
 
-            var btnDeny = new Button
+            var btnDeny = new SynapseButton
             {
                 Text = "Negar (Não)",
                 DialogResult = DialogResult.No,
-                Location = new Point(260, 235),
-                Width = 100,
-                Height = 32
+                Location = new Point(258, 258),
+                Width = 110,
+                Height = 34,
+                Variant = SynapseButtonVariant.Secondary
             };
 
-            var btnApprove = new Button
+            var btnApprove = new SynapseButton
             {
                 Text = "Permitir (Sim)",
                 DialogResult = DialogResult.Yes,
-                Location = new Point(380, 235),
-                Width = 100,
-                Height = 32
+                Location = new Point(378, 258),
+                Width = 110,
+                Height = 34,
+                Variant = SynapseButtonVariant.Danger
             };
 
             btnDeny.Click += (_, _) =>
@@ -167,7 +164,6 @@ public sealed class WinFormsConfirmationPrompt : IRemoteConfirmationPrompt
             AcceptButton = btnDeny; // Default é negar
             CancelButton = btnDeny;
 
-            Controls.Add(titleLabel);
             Controls.Add(descTextBox);
             Controls.Add(_timerLabel);
             Controls.Add(btnDeny);
@@ -185,7 +181,7 @@ public sealed class WinFormsConfirmationPrompt : IRemoteConfirmationPrompt
                 }
                 else
                 {
-                    _timerLabel.Text = $"Tempo restante para resposta: {_secondsRemaining}s (negará automaticamente)";
+                    _timerLabel.Text = $"  ⏱ {_secondsRemaining}s — negará automaticamente  ";
                 }
             };
             _countdownTimer.Start();

@@ -13,10 +13,12 @@ namespace Synapse.Tray.Chat;
 public sealed class ChatVaultForm : Form
 {
     private readonly RichTextBox _txtHistory;
+    private readonly Panel _pnlHistoryEmpty;
     private readonly TextBox _txtInput;
     private readonly SynapseButton _btnSend;
     private readonly SynapseButton _btnSaveNote;
     private readonly ListView _lstSources;
+    private readonly Label _lblSourcesEmpty;
     private readonly Label _lblStatus;
     private readonly SynapseConfigManager _configManager;
     private VaultRagEngine? _ragEngine;
@@ -34,7 +36,7 @@ public sealed class ChatVaultForm : Form
 
         // Header Panel
         var pnlHeader = SynapseTheme.CreateHeaderBar(
-            "💬 Conversar com o Segundo Cérebro",
+            "Conversar com o Segundo Cérebro",
             "Guarde pensamentos, tarefas ou tire dúvidas sobre as suas anotações do cofre.",
             64);
         Controls.Add(pnlHeader);
@@ -57,10 +59,19 @@ public sealed class ChatVaultForm : Form
             ForeColor = SynapseTheme.TextPrimary,
             BorderStyle = BorderStyle.None,
             Font = new Font(SynapseTheme.FontFamily, 10f, FontStyle.Regular),
-            Padding = new Padding(16)
+            Padding = new Padding(20, 16, 20, 16)
         };
         splitContainer.Panel1.Controls.Add(_txtHistory);
         splitContainer.Panel1.BackColor = SynapseTheme.Background;
+
+        // Estado vazio do histórico: some assim que a primeira mensagem é escrita
+        // (evita a tela ficar com uma área enorme e sem graça antes da conversa começar).
+        _pnlHistoryEmpty = new Panel { Dock = DockStyle.Fill, BackColor = SynapseTheme.Background };
+        _pnlHistoryEmpty.Controls.Add(SynapseTheme.CreateEmptyState(
+            "Pronto para conversar.\n\nConte algo que queira guardar ou pergunte sobre suas notas.",
+            SynapseTheme.Background));
+        splitContainer.Panel1.Controls.Add(_pnlHistoryEmpty);
+        _pnlHistoryEmpty.BringToFront();
 
         // Sources Panel
         var pnlSources = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8), BackColor = SynapseTheme.SurfaceAlt };
@@ -78,14 +89,20 @@ public sealed class ChatVaultForm : Form
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
-            GridLines = false
+            GridLines = false,
+            Visible = false
         };
         SynapseTheme.StyleListView(_lstSources);
         _lstSources.Columns.Add("Nota Citada", 220);
         _lstSources.Columns.Add("Similaridade", 90);
         _lstSources.Columns.Add("Trecho", 520);
         _lstSources.DoubleClick += (_, _) => OpenSelectedSource();
+        SynapseTheme.FillLastColumn(_lstSources, 200);
 
+        _lblSourcesEmpty = SynapseTheme.CreateEmptyState(
+            "Nenhuma fonte consultada ainda.\nAs notas usadas nas respostas do Segundo Cérebro aparecerão aqui.");
+
+        pnlSources.Controls.Add(_lblSourcesEmpty);
         pnlSources.Controls.Add(_lstSources);
         pnlSources.Controls.Add(lblSourcesHeader);
         splitContainer.Panel2.Controls.Add(pnlSources);
@@ -104,7 +121,7 @@ public sealed class ChatVaultForm : Form
 
         _btnSaveNote = new SynapseButton
         {
-            Text = "💾 Salvar como Nota",
+            Text = "Salvar como Nota",
             Width = 180,
             Height = 36,
             Variant = SynapseButtonVariant.Primary,
@@ -209,7 +226,7 @@ public sealed class ChatVaultForm : Form
 
             if (!string.IsNullOrWhiteSpace(outcome.SavedNotePath))
             {
-                AppendMessage("Sistema", $"💾 Salvo em: [[{Path.GetFileNameWithoutExtension(outcome.SavedNotePath)}]] ({outcome.SavedNotePath})");
+                AppendMessage("Sistema", $"Salvo em: [[{Path.GetFileNameWithoutExtension(outcome.SavedNotePath)}]] ({outcome.SavedNotePath})");
             }
 
             if (outcome.Sources.Count > 0)
@@ -220,7 +237,7 @@ public sealed class ChatVaultForm : Form
             }
             else
             {
-                _lstSources.Items.Clear();
+                ClearSourcesList();
                 _lastAnswer = null;
                 _btnSaveNote.Enabled = false;
             }
@@ -251,12 +268,12 @@ public sealed class ChatVaultForm : Form
             var relativePath = await Task.Run(async () =>
                 await _ragEngine.SaveAnswerAsNoteAsync(_lastAnswer, _vaultPath));
 
-            AppendMessage("Sistema", $"💾 Resposta salva com sucesso no cofre: [[{relativePath}]]");
+            AppendMessage("Sistema", $"Resposta salva com sucesso no cofre: [[{relativePath}]]");
             _lblStatus.Text = $"Nota salva em {relativePath}";
         }
         catch (Exception ex)
         {
-            AppendMessage("Sistema", $"⚠️ Erro ao salvar nota no cofre: {ex.Message}");
+            AppendMessage("Sistema", $"Erro ao salvar nota no cofre: {ex.Message}");
             _lblStatus.Text = "Erro ao salvar nota.";
         }
         finally
@@ -265,18 +282,57 @@ public sealed class ChatVaultForm : Form
         }
     }
 
+    // Tons de fundo sutis para as "bolhas" de mensagem do RichTextBox — misturados a partir da
+    // paleta do design system para não introduzir cores novas fora do tema Synapse Dark.
+    private static readonly Color UserBubbleBackground = MixColor(SynapseTheme.Background, SynapseTheme.AccentSecondary, 0.22f);
+    private static readonly Color AssistantBubbleBackground = SynapseTheme.Surface;
+
+    private static Color MixColor(Color from, Color to, float amount)
+    {
+        int Lerp(int a, int b) => a + (int)((b - a) * amount);
+        return Color.FromArgb(Lerp(from.R, to.R), Lerp(from.G, to.G), Lerp(from.B, to.B));
+    }
+
     private void AppendMessage(string sender, string message)
     {
-        _txtHistory.SelectionStart = _txtHistory.TextLength;
-        _txtHistory.SelectionFont = SynapseTheme.FontBodyBold(10f);
-        _txtHistory.SelectionColor = sender == "Você" ? SynapseTheme.AccentSecondary : SynapseTheme.AccentPrimary;
-        _txtHistory.AppendText($"{sender} ({DateTime.Now:HH:mm}):\n");
+        _pnlHistoryEmpty.Visible = false;
 
-        _txtHistory.SelectionFont = SynapseTheme.FontBody(10f);
+        var isUser = sender == "Você";
+        var isSystem = sender == "Sistema";
+        var accentColor = isUser ? SynapseTheme.AccentSecondary : isSystem ? SynapseTheme.TextSecondary : SynapseTheme.AccentPrimary;
+
+        // Mensagens do usuário à direita, do assistente à esquerda e avisos de sistema
+        // centralizados — para dar a sensação de conversa em vez de um log plano de texto.
+        _txtHistory.SelectionAlignment = isUser ? HorizontalAlignment.Right : isSystem ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+
+        var messageStart = _txtHistory.TextLength;
+
+        _txtHistory.SelectionFont = SynapseTheme.FontBodyBold(9f);
+        _txtHistory.SelectionColor = accentColor;
+        _txtHistory.AppendText($"{sender} · {DateTime.Now:HH:mm}\n");
+
+        _txtHistory.SelectionFont = isSystem ? SynapseTheme.FontCaptionItalic(9.5f) : SynapseTheme.FontBody(10f);
+        _txtHistory.SelectionColor = isSystem ? SynapseTheme.TextSecondary : SynapseTheme.TextPrimary;
+        _txtHistory.AppendText($"{message}\n");
+
+        if (!isSystem)
+        {
+            // Pinta o fundo do bloco recém-escrito com um tom sutil, dando um efeito de
+            // "bolha de chat" alinhada à direita (usuário) ou à esquerda (assistente).
+            var messageEnd = _txtHistory.TextLength;
+            _txtHistory.Select(messageStart, messageEnd - messageStart);
+            _txtHistory.SelectionBackColor = isUser ? UserBubbleBackground : AssistantBubbleBackground;
+        }
+
+        // Volta a formatação padrão antes de escrever o espaçamento em branco entre mensagens,
+        // senão o RichTextBox propaga o fundo colorido da bolha para a linha vazia seguinte.
+        _txtHistory.Select(_txtHistory.TextLength, 0);
+        _txtHistory.SelectionBackColor = _txtHistory.BackColor;
         _txtHistory.SelectionColor = SynapseTheme.TextPrimary;
-        _txtHistory.AppendText($"{message}\n\n");
+        _txtHistory.SelectionFont = SynapseTheme.FontBody(10f);
+        _txtHistory.AppendText("\n");
 
-        // RichTextBox.AppendText deixa o trecho recém-inserido "selecionado" internamente,
+        // RichTextBox.AppendText/Select deixam o trecho recém-inserido "selecionado" internamente,
         // o que renderiza como um destaque azul permanente sobre o texto — precisa colapsar
         // a seleção de volta para o fim antes de repintar.
         _txtHistory.Select(_txtHistory.TextLength, 0);
@@ -294,6 +350,16 @@ public sealed class ChatVaultForm : Form
             lvi.Tag = Path.Combine(_vaultPath, src.RelativePath);
             _lstSources.Items.Add(lvi);
         }
+
+        _lblSourcesEmpty.Visible = _lstSources.Items.Count == 0;
+        _lstSources.Visible = _lstSources.Items.Count > 0;
+    }
+
+    private void ClearSourcesList()
+    {
+        _lstSources.Items.Clear();
+        _lstSources.Visible = false;
+        _lblSourcesEmpty.Visible = true;
     }
 
     private void OpenSelectedSource()

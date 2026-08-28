@@ -69,23 +69,23 @@ public static class SynapseTheme
             Dock = DockStyle.Top,
             Height = height,
             BackColor = SurfaceAlt,
-            Padding = new Padding(20, 10, 20, 10)
+            Padding = new Padding(24, 10, 24, 10)
         };
 
         var accent = new Panel
         {
             Dock = DockStyle.Left,
-            Width = 3,
+            Width = 4,
             BackColor = AccentPrimary
         };
 
         var lblTitle = new Label
         {
             Text = title,
-            Font = FontHeadline(12f),
+            Font = FontHeadline(12.5f),
             ForeColor = TextPrimary,
             AutoSize = true,
-            Location = new Point(20, string.IsNullOrEmpty(subtitle) ? (height - 20) / 2 : 10)
+            Location = new Point(24, string.IsNullOrEmpty(subtitle) ? (height - 20) / 2 : 12)
         };
 
         panel.Controls.Add(lblTitle);
@@ -98,12 +98,22 @@ public static class SynapseTheme
                 Font = FontCaption(9f),
                 ForeColor = TextSecondary,
                 AutoSize = true,
-                Location = new Point(20, 33)
+                Location = new Point(24, 34)
             };
             panel.Controls.Add(lblSubtitle);
         }
 
+        // Divisor sutil de 1px separando o header do conteúdo, no lugar de sombra pesada
+        // (consistente com o resto do design system, que usa bordas finas em vez de sombra).
+        var divider = new Panel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 1,
+            BackColor = Border
+        };
+
         panel.Controls.Add(accent);
+        panel.Controls.Add(divider);
         return panel;
     }
 
@@ -132,6 +142,49 @@ public static class SynapseTheme
         };
         listView.DrawItem += (s, e) => e.DrawDefault = true;
         listView.DrawSubItem += (s, e) => e.DrawDefault = true;
+    }
+
+    /// <summary>
+    /// Faz a última coluna de um ListView em modo Details preencher 100% da largura disponível
+    /// do controle, para que não sobre uma faixa de fundo branca (cor padrão do Windows) à
+    /// direita do cabeçalho quando a soma das larguras das colunas é menor que a largura real.
+    /// Reserva a largura de uma scrollbar vertical como margem de segurança, para nunca causar
+    /// scroll horizontal quando a lista ganha itens depois do redimensionamento.
+    /// </summary>
+    public static void FillLastColumn(ListView listView, int minWidth = 80)
+    {
+        void Resize()
+        {
+            if (listView.IsDisposed || listView.Columns.Count == 0) return;
+
+            var last = listView.Columns[listView.Columns.Count - 1];
+            var othersWidth = 0;
+            for (var i = 0; i < listView.Columns.Count - 1; i++)
+            {
+                othersWidth += listView.Columns[i].Width;
+            }
+
+            var available = listView.ClientSize.Width - othersWidth - SystemInformation.VerticalScrollBarWidth;
+            last.Width = Math.Max(minWidth, available);
+        }
+
+        listView.Resize += (_, _) => Resize();
+        Resize();
+    }
+
+    /// <summary>Label de "estado vazio" centralizado, para painéis/listas sem conteúdo ainda.</summary>
+    public static Label CreateEmptyState(string text, Color? backColor = null)
+    {
+        return new Label
+        {
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = TextDisabled,
+            BackColor = backColor ?? SurfaceAlt,
+            Font = FontBody(9.5f),
+            Padding = new Padding(24),
+            Text = text
+        };
     }
 
     /// <summary>Painel "card" com fundo elevado e borda sutil de 1px, ao estilo do design system.</summary>

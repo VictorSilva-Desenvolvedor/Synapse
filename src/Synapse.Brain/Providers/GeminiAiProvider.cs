@@ -8,9 +8,12 @@ namespace Synapse.Brain.Providers;
 
 /// <summary>
 /// Provedor principal de inteligência artificial usando a API oficial do Google Gemini (Free Tier).
-/// Usa o alias "gemini-flash-latest" (sempre aponta pro modelo flash atual do Google) por padrão,
-/// já que versões fixas específicas (ex.: gemini-1.5-flash, gemini-2.5-flash) são descontinuadas
-/// periodicamente pelo Google. Suporta modo JSON estruturado nativo.
+/// Modelo padrão fixado em "gemini-3.6-flash" (validado com resposta rápida e consistente).
+/// O alias "gemini-flash-latest" foi avaliado como alternativa auto-atualizável, mas na prática
+/// apresentou respostas muito lentas (~2 min) e falhas transitórias mais frequentes — por isso
+/// se optou por uma versão fixa. Como o Google descontinua versões específicas periodicamente
+/// (ex.: gemini-1.5-flash, gemini-2.5-flash já descontinuados), esse valor pode precisar ser
+/// atualizado de novo no futuro. Suporta modo JSON estruturado nativo.
 /// </summary>
 public sealed class GeminiAiProvider : IBrainAiProvider
 {

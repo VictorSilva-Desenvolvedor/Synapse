@@ -12,7 +12,7 @@ public sealed class BrainConfig
 
     // Configurações do Google Gemini (Free Tier)
     public string GeminiApiKey { get; set; } = string.Empty;
-    public string GeminiModel { get; set; } = "gemini-flash-latest";
+    public string GeminiModel { get; set; } = "gemini-3.6-flash";
 
     // Configurações do Ollama (Local & 100% Offline)
     public string OllamaEndpoint { get; set; } = "http://localhost:11434";

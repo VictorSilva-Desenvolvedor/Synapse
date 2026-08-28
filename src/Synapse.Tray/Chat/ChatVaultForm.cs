@@ -171,7 +171,7 @@ public sealed class ChatVaultForm : Form
         var brainConfig = new BrainConfig
         {
             GeminiApiKey = config.GeminiApiKey,
-            GeminiModel = string.IsNullOrWhiteSpace(config.GeminiModel) ? "gemini-flash-latest" : config.GeminiModel
+            GeminiModel = string.IsNullOrWhiteSpace(config.GeminiModel) ? "gemini-3.6-flash" : config.GeminiModel
         };
 
         var embeddingProvider = new GeminiEmbeddingProvider(brainConfig);

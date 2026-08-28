@@ -150,7 +150,7 @@ public sealed class QuickCaptureForm : Form
             {
                 ProviderType = isGemini ? AiProviderType.Gemini : AiProviderType.Ollama,
                 GeminiApiKey = config.GeminiApiKey,
-                GeminiModel = string.IsNullOrWhiteSpace(config.GeminiModel) ? "gemini-flash-latest" : config.GeminiModel
+                GeminiModel = string.IsNullOrWhiteSpace(config.GeminiModel) ? "gemini-3.6-flash" : config.GeminiModel
             };
 
             IBrainAiProvider provider = isGemini

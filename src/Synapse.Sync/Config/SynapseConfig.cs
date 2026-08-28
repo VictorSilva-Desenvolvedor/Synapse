@@ -37,7 +37,7 @@ public sealed class SynapseConfig
 
     // Configurações da IA Gemini (Segundo Cérebro)
     public string GeminiApiKey { get; set; } = string.Empty;
-    public string GeminiModel { get; set; } = "gemini-flash-latest";
+    public string GeminiModel { get; set; } = "gemini-3.6-flash";
 
     // Controle Remoto via GitHub Relay (Fase 1 e Fase 2)
     public bool RemoteControlEnabled { get; set; } = false;

@@ -4,6 +4,7 @@ using Synapse.Brain.Models;
 using Synapse.Brain.Ports;
 using Synapse.Brain.Providers;
 using Synapse.Brain.Services;
+using Synapse.Core.Logging;
 using Synapse.Sync.Auth;
 using Synapse.Sync.Config;
 using Synapse.Sync.GitHub;
@@ -222,6 +223,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             _remoteControlItem.Checked = config.RemoteControlEnabled;
 
             var statusMsg = config.RemoteControlEnabled ? "ativado" : "desativado";
+            _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "ToggleRemoteControl", $"NovoEstado: {statusMsg}");
+
             _notifyIcon.ShowBalloonTip(
                 3000,
                 "Synapse Remote",
@@ -334,6 +337,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OpenSettings()
     {
+        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenSettings");
         using var form = new Onboarding.OnboardingForm();
         if (form.ShowDialog() == DialogResult.OK)
         {
@@ -344,30 +348,35 @@ public sealed class TrayApplicationContext : ApplicationContext
 
     private void OpenDiagnostics()
     {
+        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenDiagnostics");
         using var form = new Diagnostics.DiagnosticsForm();
         form.ShowDialog();
     }
 
     private void OpenQuickCapture()
     {
+        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenQuickCapture");
         using var form = new QuickCapture.QuickCaptureForm();
         form.ShowDialog();
     }
 
     private void OpenChatVault()
     {
+        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenChatVault");
         using var form = new Chat.ChatVaultForm();
         form.ShowDialog();
     }
 
     private void OpenFlashcardReview()
     {
+        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenFlashcardReview");
         using var form = new Review.FlashcardReviewForm();
         form.ShowDialog();
     }
 
     private void OpenVaultStats()
     {
+        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenVaultStats");
         using var form = new Metrics.VaultStatsForm();
         form.ShowDialog();
     }

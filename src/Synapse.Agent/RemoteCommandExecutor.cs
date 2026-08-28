@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Synapse.Agent.Models;
 using Synapse.Brain.Ports;
+using Synapse.Core.Logging;
 using Synapse.Sync.Config;
 
 namespace Synapse.Agent;
@@ -499,7 +500,9 @@ public sealed class RemoteCommandExecutor
         try
         {
             _logger?.LogInformation("Executando consulta RAG no cofre para a pergunta: \"{Question}\"", question);
+            var sw = Stopwatch.StartNew();
             var answer = await _brainQuery.AskVaultAsync(question.Trim(), config.VaultPath, ct);
+            sw.Stop();
 
             var answerMessage = answer.Answer;
             if (answer.Sources != null && answer.Sources.Count > 0)
@@ -507,6 +510,14 @@ public sealed class RemoteCommandExecutor
                 var sourcesFormatted = string.Join(", ", answer.Sources.Select(s => string.IsNullOrWhiteSpace(s.Title) ? $"[[{Path.GetFileNameWithoutExtension(s.RelativePath)}]]" : $"[[{s.Title}]]"));
                 answerMessage += $"\n\nFontes: {sourcesFormatted}";
             }
+
+            SynapseActivityLogger.Instance.SetVaultPath(config.VaultPath);
+            _ = SynapseActivityLogger.Instance.LogChatAsync(
+                question.Trim(),
+                answerMessage,
+                sw.ElapsedMilliseconds,
+                "Success",
+                answer.Sources?.Select(s => s.Title).ToList());
 
             return new RemoteCommandResult(
                 command.Id,
@@ -517,6 +528,15 @@ public sealed class RemoteCommandExecutor
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Erro ao processar consulta AskVault para o comando {CommandId}", command.Id);
+            _ = SynapseActivityLogger.Instance.LogChatAsync(
+                question.Trim(),
+                string.Empty,
+                0,
+                "Failed",
+                null,
+                null,
+                ex.Message);
+
             return new RemoteCommandResult(
                 command.Id,
                 DateTimeOffset.UtcNow,

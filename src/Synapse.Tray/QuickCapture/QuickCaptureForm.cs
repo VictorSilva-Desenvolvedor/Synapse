@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using Synapse.Brain.Models;
 using Synapse.Brain.Ports;
 using Synapse.Brain.Providers;
 using Synapse.Brain.Services;
+using Synapse.Core.Logging;
 using Synapse.Sync.Config;
 using Synapse.Tray.UI;
 
@@ -141,7 +143,9 @@ public sealed class QuickCaptureForm : Form
             return;
         }
 
+        _ = SynapseActivityLogger.Instance.LogClickAsync("QuickCapture", "BtnProcessAi", $"Length: {text.Length}");
         SetProcessingState(true, "Processando com a API do Gemini e conectando ao cofre...");
+        var sw = Stopwatch.StartNew();
 
         try
         {
@@ -159,6 +163,16 @@ public sealed class QuickCaptureForm : Form
 
             var captureService = new SmartCaptureService(provider, brainConfig);
             var relativePath = await captureService.ProcessAndSaveToVaultAsync(text, config.VaultPath);
+            sw.Stop();
+
+            SynapseActivityLogger.Instance.SetVaultPath(config.VaultPath);
+            _ = SynapseActivityLogger.Instance.LogActionAsync(
+                "QuickCapture",
+                "ProcessAndSaveToVault",
+                $"Provider: {(isGemini ? "Gemini" : "Ollama")} | Input: \"{(text.Length > 60 ? text[..57] + "..." : text)}\"",
+                "Success",
+                sw.ElapsedMilliseconds,
+                affectedPath: relativePath);
 
             SetProcessingState(false, $"Salvo com sucesso em: {relativePath}");
             MessageBox.Show($"Nota criada e conectada com sucesso no cofre com a API do Gemini!\n\nArquivo: {relativePath}", "Synapse Brain", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -167,6 +181,15 @@ public sealed class QuickCaptureForm : Form
         }
         catch (Exception ex)
         {
+            sw.Stop();
+            _ = SynapseActivityLogger.Instance.LogActionAsync(
+                "QuickCapture",
+                "ProcessAndSaveToVault",
+                $"Provider: {(_cmbProvider.SelectedIndex == 0 ? "Gemini" : "Ollama")}",
+                "Failed",
+                sw.ElapsedMilliseconds,
+                errorMessage: ex.Message);
+
             SetProcessingState(false, "Erro ao processar.");
             MessageBox.Show($"Falha ao processar captura com IA: {ex.Message}", "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }

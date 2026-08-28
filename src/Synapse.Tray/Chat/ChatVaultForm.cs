@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Synapse.Brain.Models;
 using Synapse.Brain.Providers;
 using Synapse.Brain.Services;
+using Synapse.Core.Logging;
 using Synapse.Sync.Config;
 using Synapse.Tray.UI;
 
@@ -202,6 +203,9 @@ public sealed class ChatVaultForm : Form
         _lblStatus.Text = "Indexando notas do cofre...";
         await Task.Run(async () => await _ragEngine.IndexVaultAsync(_vaultPath));
 
+        SynapseActivityLogger.Instance.SetVaultPath(_vaultPath);
+        _ = SynapseActivityLogger.Instance.LogActionAsync("ChatVault", "InitializeRag", $"VaultPath: {_vaultPath}");
+
         _lblStatus.Text = "Pronto para conversar com o seu Segundo Cérebro.";
         AppendMessage("Synapse Brain", "Olá! Sou o assistente de inteligência do seu Segundo Cérebro. Pronto. Pode me contar o que quiser guardar, ou perguntar algo sobre o seu cofre.");
     }
@@ -218,9 +222,21 @@ public sealed class ChatVaultForm : Form
 
         AppendMessage("Você", question);
 
+        _ = SynapseActivityLogger.Instance.LogClickAsync("ChatVault", "BtnSend", $"Pergunta: \"{question}\"");
+        var sw = Stopwatch.StartNew();
+
         try
         {
             var outcome = await Task.Run(async () => await _ragEngine.ProcessChatTurnAsync(question, _vaultPath));
+            sw.Stop();
+
+            _ = SynapseActivityLogger.Instance.LogChatAsync(
+                question,
+                outcome.ReplyMessage,
+                sw.ElapsedMilliseconds,
+                "Success",
+                outcome.Sources.Select(s => s.Title).ToList(),
+                outcome.SavedNotePath);
 
             AppendMessage("Synapse Brain", outcome.ReplyMessage);
 
@@ -246,6 +262,16 @@ public sealed class ChatVaultForm : Form
         }
         catch (Exception ex)
         {
+            sw.Stop();
+            _ = SynapseActivityLogger.Instance.LogChatAsync(
+                question,
+                string.Empty,
+                sw.ElapsedMilliseconds,
+                "Failed",
+                null,
+                null,
+                ex.Message);
+
             AppendMessage("Sistema", $"Erro ao processar mensagem: {ex.Message}");
             _lblStatus.Text = "Erro na conversa.";
         }
@@ -262,11 +288,22 @@ public sealed class ChatVaultForm : Form
 
         _btnSaveNote.Enabled = false;
         _lblStatus.Text = "Salvando resposta como nota no cofre...";
+        _ = SynapseActivityLogger.Instance.LogClickAsync("ChatVault", "BtnSaveNote", $"Pergunta: \"{_lastAnswer.Question}\"");
 
         try
         {
+            var sw = Stopwatch.StartNew();
             var relativePath = await Task.Run(async () =>
                 await _ragEngine.SaveAnswerAsNoteAsync(_lastAnswer, _vaultPath));
+            sw.Stop();
+
+            _ = SynapseActivityLogger.Instance.LogActionAsync(
+                "ChatVault",
+                "SaveAnswerNote",
+                $"Salvo em: {relativePath}",
+                "Success",
+                sw.ElapsedMilliseconds,
+                affectedPath: relativePath);
 
             AppendMessage("Sistema", $"Resposta salva com sucesso no cofre: [[{relativePath}]]");
             _lblStatus.Text = $"Nota salva em {relativePath}";

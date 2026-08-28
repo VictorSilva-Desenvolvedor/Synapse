@@ -141,6 +141,42 @@ public static class SynapseTheme
         };
     }
 
+    /// <summary>Aplica tema escuro a um TabControl via desenho customizado das abas.</summary>
+    public static void StyleTabControl(TabControl tabControl)
+    {
+        tabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
+        tabControl.SizeMode = TabSizeMode.Normal;
+        tabControl.ItemSize = new Size(0, 32);
+        tabControl.Padding = new Point(16, 6);
+        tabControl.Font = FontBodyBold(9.5f);
+
+        tabControl.DrawItem += (s, e) =>
+        {
+            var tc = (TabControl)s!;
+            var tabRect = tc.GetTabRect(e.Index);
+            var selected = e.Index == tc.SelectedIndex;
+
+            using var bg = new SolidBrush(selected ? Surface : SurfaceAlt);
+            e.Graphics.FillRectangle(bg, tabRect);
+
+            if (selected)
+            {
+                using var accent = new SolidBrush(AccentPrimary);
+                e.Graphics.FillRectangle(accent, tabRect.X, tabRect.Bottom - 2, tabRect.Width, 2);
+            }
+
+            TextRenderer.DrawText(e.Graphics, tc.TabPages[e.Index].Text, tc.Font, tabRect,
+                selected ? TextPrimary : TextSecondary,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        };
+
+        foreach (TabPage page in tabControl.TabPages)
+        {
+            page.BackColor = Surface;
+            page.ForeColor = TextPrimary;
+        }
+    }
+
     /// <summary>Badge/pill de status colorido (ex.: "Sincronizado", "Erro", "Pendente").</summary>
     public static Label CreateStatusBadge(string text, Color color)
     {

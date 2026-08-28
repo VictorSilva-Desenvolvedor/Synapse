@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Synapse.Sync.Config;
 using Synapse.Sync.Diagnostics;
+using Synapse.Tray.UI;
 
 namespace Synapse.Tray.Diagnostics;
 
@@ -24,53 +25,32 @@ public sealed class DiagnosticsForm : Form
         Text = "Synapse — Diagnóstico e Conflitos";
         Size = new Size(860, 600);
         StartPosition = FormStartPosition.CenterScreen;
-        Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+        SynapseTheme.ApplyFormChrome(this);
 
         // Header Panel
-        var pnlHeader = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = 60,
-            BackColor = Color.FromArgb(24, 24, 27)
-        };
-
-        var lblTitle = new Label
-        {
-            Text = "Diagnóstico & Histórico do Synapse",
-            Font = new Font("Segoe UI", 12f, FontStyle.Bold),
-            ForeColor = Color.White,
-            Location = new Point(20, 10),
-            AutoSize = true
-        };
-
-        var lblSubtitle = new Label
-        {
-            Text = "Inspeção de conflitos preservados e visualização de logs em tempo real",
-            Font = new Font("Segoe UI", 9f, FontStyle.Regular),
-            ForeColor = Color.FromArgb(161, 161, 170),
-            Location = new Point(20, 34),
-            AutoSize = true
-        };
-
-        pnlHeader.Controls.Add(lblTitle);
-        pnlHeader.Controls.Add(lblSubtitle);
+        var pnlHeader = SynapseTheme.CreateHeaderBar(
+            "Diagnóstico & Histórico do Synapse",
+            "Inspeção de conflitos preservados e visualização de logs em tempo real",
+            60);
         Controls.Add(pnlHeader);
 
         // Tab Control
         _tabControl = new TabControl
         {
             Dock = DockStyle.Fill,
-            Padding = new Point(12, 6)
+            BackColor = SynapseTheme.Surface
         };
 
         // Tab 1: Conflitos
         var tabConflicts = new TabPage("Conflitos Preservados (_conflitos/)");
         tabConflicts.Padding = new Padding(12);
+        tabConflicts.BackColor = SynapseTheme.Background;
 
         var lblConflictInfo = new Label
         {
-            Text = "Política de Zero Perda de Dados (RNF-2): Conflitos não resolvidos automaticamente são mantidos com segurança na pasta _conflitos/.",
-            ForeColor = Color.FromArgb(113, 113, 122),
+            Text = "Política de Zero Perda de Dados (RNF-2): conflitos não resolvidos automaticamente são mantidos com segurança na pasta _conflitos/.",
+            ForeColor = SynapseTheme.TextSecondary,
+            Font = SynapseTheme.FontCaption(9f),
             Dock = DockStyle.Top,
             Height = 28
         };
@@ -81,8 +61,9 @@ public sealed class DiagnosticsForm : Form
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
-            GridLines = true
+            GridLines = false
         };
+        SynapseTheme.StyleListView(_lstConflicts);
         _lstConflicts.Columns.Add("Arquivo", 240);
         _lstConflicts.Columns.Add("Caminho Relativo", 320);
         _lstConflicts.Columns.Add("Modificado em", 140);
@@ -93,46 +74,47 @@ public sealed class DiagnosticsForm : Form
         {
             Dock = DockStyle.Bottom,
             Height = 45,
-            Padding = new Padding(0, 8, 0, 0)
+            Padding = new Padding(0, 8, 0, 0),
+            BackColor = SynapseTheme.Background
         };
 
-        var btnResolveDiff = new Button
+        var btnResolveDiff = new SynapseButton
         {
             Text = "Resolver (3-Way Diff)...",
-            Location = new Point(0, 8),
+            Location = new Point(0, 6),
             Width = 170,
-            Height = 30,
-            BackColor = Color.FromArgb(16, 185, 129),
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+            Height = 32,
+            Variant = SynapseButtonVariant.Primary
         };
         btnResolveDiff.Click += (_, _) => OpenThreeWayDiffForSelectedConflict();
 
-        var btnOpenConflictFile = new Button
+        var btnOpenConflictFile = new SynapseButton
         {
             Text = "Abrir Arquivo",
-            Location = new Point(180, 8),
+            Location = new Point(180, 6),
             Width = 110,
-            Height = 30
+            Height = 32,
+            Variant = SynapseButtonVariant.Secondary
         };
         btnOpenConflictFile.Click += (_, _) => OpenSelectedConflict();
 
-        var btnOpenConflictFolder = new Button
+        var btnOpenConflictFolder = new SynapseButton
         {
             Text = "Abrir Pasta _conflitos",
-            Location = new Point(300, 8),
+            Location = new Point(300, 6),
             Width = 160,
-            Height = 30
+            Height = 32,
+            Variant = SynapseButtonVariant.Secondary
         };
         btnOpenConflictFolder.Click += (_, _) => OpenConflictsDirectory();
 
-        var btnRefreshConflicts = new Button
+        var btnRefreshConflicts = new SynapseButton
         {
             Text = "Atualizar Lista",
-            Location = new Point(470, 8),
+            Location = new Point(470, 6),
             Width = 120,
-            Height = 30
+            Height = 32,
+            Variant = SynapseButtonVariant.Ghost
         };
         btnRefreshConflicts.Click += async (_, _) => await RefreshConflictsAsync();
 
@@ -147,14 +129,16 @@ public sealed class DiagnosticsForm : Form
         // Tab 2: Logs
         var tabLogs = new TabPage("Logs do Serviço (Serilog)");
         tabLogs.Padding = new Padding(12);
+        tabLogs.BackColor = SynapseTheme.Background;
 
         _txtLogs = new RichTextBox
         {
             Dock = DockStyle.Fill,
             ReadOnly = true,
-            BackColor = Color.FromArgb(24, 24, 27),
+            BackColor = SynapseTheme.SurfaceAlt,
             ForeColor = Color.FromArgb(228, 228, 231),
-            Font = new Font("Consolas", 9.5f, FontStyle.Regular),
+            Font = SynapseTheme.FontMono(9.5f),
+            BorderStyle = BorderStyle.FixedSingle,
             WordWrap = false
         };
         tabLogs.Controls.Add(_txtLogs);
@@ -163,33 +147,37 @@ public sealed class DiagnosticsForm : Form
         {
             Dock = DockStyle.Bottom,
             Height = 45,
-            Padding = new Padding(0, 8, 0, 0)
+            Padding = new Padding(0, 8, 0, 0),
+            BackColor = SynapseTheme.Background
         };
 
-        var btnCopyLogs = new Button
+        var btnCopyLogs = new SynapseButton
         {
             Text = "Copiar Logs",
-            Location = new Point(0, 8),
+            Location = new Point(0, 6),
             Width = 110,
-            Height = 30
+            Height = 32,
+            Variant = SynapseButtonVariant.Secondary
         };
         btnCopyLogs.Click += (_, _) => CopyLogsToClipboard();
 
-        var btnRefreshLogs = new Button
+        var btnRefreshLogs = new SynapseButton
         {
             Text = "Atualizar Logs",
-            Location = new Point(120, 8),
+            Location = new Point(120, 6),
             Width = 120,
-            Height = 30
+            Height = 32,
+            Variant = SynapseButtonVariant.Secondary
         };
         btnRefreshLogs.Click += async (_, _) => await RefreshLogsAsync();
 
-        var btnOpenLogFile = new Button
+        var btnOpenLogFile = new SynapseButton
         {
             Text = "Abrir Arquivo de Log",
-            Location = new Point(250, 8),
+            Location = new Point(250, 6),
             Width = 150,
-            Height = 30
+            Height = 32,
+            Variant = SynapseButtonVariant.Secondary
         };
         btnOpenLogFile.Click += (_, _) => OpenCurrentLogFile();
 
@@ -199,7 +187,9 @@ public sealed class DiagnosticsForm : Form
         {
             Text = "Auto-atualizar (3s)",
             Checked = true,
-            Location = new Point(420, 13),
+            ForeColor = SynapseTheme.TextSecondary,
+            Font = SynapseTheme.FontBody(9f),
+            Location = new Point(420, 11),
             AutoSize = true
         };
         chkAutoRefresh.CheckedChanged += (_, _) => _autoRefreshTimer.Enabled = chkAutoRefresh.Checked;
@@ -213,6 +203,7 @@ public sealed class DiagnosticsForm : Form
         _tabControl.TabPages.Add(tabLogs);
 
         Controls.Add(_tabControl);
+        SynapseTheme.StyleTabControl(_tabControl);
         _autoRefreshTimer.Tick += async (_, _) =>
         {
             if (_tabControl.SelectedTab == tabLogs)
@@ -261,7 +252,7 @@ public sealed class DiagnosticsForm : Form
         if (conflicts.Count == 0)
         {
             var lvi = new ListViewItem("Nenhum conflito encontrado. Seu cofre está 100% sincronizado.");
-            lvi.ForeColor = Color.DarkGray;
+            lvi.ForeColor = SynapseTheme.TextSecondary;
             _lstConflicts.Items.Add(lvi);
         }
     }

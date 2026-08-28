@@ -1,4 +1,5 @@
 using Synapse.Brain.SpacedRepetition;
+using Synapse.Tray.UI;
 
 namespace Synapse.Tray.Review;
 
@@ -13,7 +14,7 @@ public sealed class FlashcardReviewForm : Form
     private readonly Label _lblSource;
     private readonly Label _lblQuestion;
     private readonly Label _lblAnswer;
-    private readonly Button _btnReveal;
+    private readonly SynapseButton _btnReveal;
     private readonly Panel _pnlRatings;
 
     public FlashcardReviewForm(IReadOnlyList<FlashcardItem>? cards = null)
@@ -21,27 +22,26 @@ public sealed class FlashcardReviewForm : Form
         _cards = cards?.ToList() ?? GenerateSampleCards();
 
         Text = "Synapse — Revisão Ativa (Flashcards & SM-2)";
-        Size = new Size(680, 520);
+        Size = new Size(680, 540);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
-        Font = new Font("Segoe UI", 10f, FontStyle.Regular);
-        BackColor = Color.FromArgb(248, 250, 252);
+        SynapseTheme.ApplyFormChrome(this);
 
         // Header Panel
         var pnlHeader = new Panel
         {
             Dock = DockStyle.Top,
             Height = 55,
-            BackColor = Color.FromArgb(15, 23, 42),
+            BackColor = SynapseTheme.SurfaceAlt,
             Padding = new Padding(16, 12, 16, 12)
         };
 
         _lblCounter = new Label
         {
             Text = "Card 1 de 1",
-            Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-            ForeColor = Color.White,
+            Font = SynapseTheme.FontBodyBold(10f),
+            ForeColor = SynapseTheme.TextPrimary,
             Location = new Point(16, 16),
             AutoSize = true
         };
@@ -49,8 +49,8 @@ public sealed class FlashcardReviewForm : Form
         _lblSource = new Label
         {
             Text = "Origem: Nota",
-            Font = new Font("Segoe UI", 9f, FontStyle.Regular),
-            ForeColor = Color.FromArgb(148, 163, 184),
+            Font = SynapseTheme.FontCaption(9f),
+            ForeColor = SynapseTheme.TextSecondary,
             Location = new Point(200, 18),
             AutoSize = true
         };
@@ -60,37 +60,38 @@ public sealed class FlashcardReviewForm : Form
         Controls.Add(pnlHeader);
 
         // Question Panel
-        var pnlCard = new Panel
+        var pnlCard = new RoundedPanel
         {
-            Location = new Point(30, 75),
+            Location = new Point(30, 80),
             Size = new Size(605, 300),
-            BackColor = Color.White,
-            BorderStyle = BorderStyle.FixedSingle,
-            Padding = new Padding(20)
+            BackColor = SynapseTheme.Surface,
+            BorderColor = SynapseTheme.Border,
+            Radius = SynapseTheme.RadiusLarge,
+            Padding = new Padding(24)
         };
 
         _lblQuestion = new Label
         {
-            Location = new Point(20, 20),
-            Size = new Size(560, 100),
-            Font = new Font("Segoe UI", 12.5f, FontStyle.Bold),
-            ForeColor = Color.FromArgb(30, 41, 59),
+            Location = new Point(24, 24),
+            Size = new Size(556, 100),
+            Font = SynapseTheme.FontHeadline(13f),
+            ForeColor = SynapseTheme.TextPrimary,
             Text = "Carregando pergunta..."
         };
 
         var sep = new Panel
         {
-            Location = new Point(20, 125),
-            Size = new Size(560, 1),
-            BackColor = Color.FromArgb(226, 232, 240)
+            Location = new Point(24, 130),
+            Size = new Size(556, 1),
+            BackColor = SynapseTheme.Border
         };
 
         _lblAnswer = new Label
         {
-            Location = new Point(20, 140),
-            Size = new Size(560, 140),
-            Font = new Font("Segoe UI", 11f, FontStyle.Regular),
-            ForeColor = Color.FromArgb(51, 65, 85),
+            Location = new Point(24, 146),
+            Size = new Size(556, 140),
+            Font = SynapseTheme.FontBody(11f),
+            ForeColor = SynapseTheme.TextSecondary,
             Text = "...",
             Visible = false
         };
@@ -101,15 +102,13 @@ public sealed class FlashcardReviewForm : Form
         Controls.Add(pnlCard);
 
         // Action Buttons
-        _btnReveal = new Button
+        _btnReveal = new SynapseButton
         {
             Text = "Mostrar Resposta (Espaço)",
-            Location = new Point(230, 395),
-            Size = new Size(220, 45),
-            BackColor = Color.FromArgb(59, 130, 246),
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 10.5f, FontStyle.Bold)
+            Location = new Point(230, 400),
+            Size = new Size(220, 46),
+            Variant = SynapseButtonVariant.Secondary,
+            Radius = SynapseTheme.RadiusMedium
         };
         _btnReveal.Click += (_, _) => RevealAnswer();
         Controls.Add(_btnReveal);
@@ -117,15 +116,15 @@ public sealed class FlashcardReviewForm : Form
         // Rating Buttons Panel (Hidden until reveal)
         _pnlRatings = new Panel
         {
-            Location = new Point(30, 390),
+            Location = new Point(30, 396),
             Size = new Size(605, 60),
             Visible = false
         };
 
-        var btnAgain = CreateRatingButton("🔴 Errei (0)", Color.FromArgb(239, 68, 68), 0, () => GradeCard(0));
-        var btnHard = CreateRatingButton("🟡 Difícil (3)", Color.FromArgb(245, 158, 11), 155, () => GradeCard(3));
-        var btnGood = CreateRatingButton("🟢 Bom (4)", Color.FromArgb(16, 185, 129), 310, () => GradeCard(4));
-        var btnEasy = CreateRatingButton("🔵 Fácil (5)", Color.FromArgb(59, 130, 246), 465, () => GradeCard(5));
+        var btnAgain = CreateRatingButton("🔴 Errei (0)", SynapseTheme.Error, 0, () => GradeCard(0));
+        var btnHard = CreateRatingButton("🟡 Difícil (3)", SynapseTheme.Warning, 155, () => GradeCard(3));
+        var btnGood = CreateRatingButton("🟢 Bom (4)", SynapseTheme.AccentPrimary, 310, () => GradeCard(4));
+        var btnEasy = CreateRatingButton("🔵 Fácil (5)", SynapseTheme.AccentSecondary, 465, () => GradeCard(5));
 
         _pnlRatings.Controls.Add(btnAgain);
         _pnlRatings.Controls.Add(btnHard);
@@ -136,17 +135,15 @@ public sealed class FlashcardReviewForm : Form
         UpdateCardView();
     }
 
-    private Button CreateRatingButton(string text, Color color, int left, Action onClick)
+    private SynapseButton CreateRatingButton(string text, Color color, int left, Action onClick)
     {
-        var btn = new Button
+        var btn = new SynapseButton
         {
             Text = text,
             Location = new Point(left, 5),
-            Size = new Size(135, 45),
-            BackColor = color,
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+            Size = new Size(135, 46),
+            FillOverride = color,
+            Radius = SynapseTheme.RadiusMedium
         };
         btn.Click += (_, _) => onClick();
         return btn;

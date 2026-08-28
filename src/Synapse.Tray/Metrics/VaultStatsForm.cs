@@ -1,6 +1,7 @@
 using Synapse.Sync.Backup;
 using Synapse.Sync.Config;
 using Synapse.Sync.Metrics;
+using Synapse.Tray.UI;
 
 namespace Synapse.Tray.Metrics;
 
@@ -15,7 +16,7 @@ public sealed class VaultStatsForm : Form
     private readonly Label _lblReadingTime;
     private readonly Label _lblRecentActivity;
     private readonly ListView _lstCategories;
-    private readonly Button _btnExportBackup;
+    private readonly SynapseButton _btnExportBackup;
     private string _vaultPath = string.Empty;
 
     public VaultStatsForm(SynapseConfigManager? configManager = null)
@@ -23,55 +24,31 @@ public sealed class VaultStatsForm : Form
         _configManager = configManager ?? new SynapseConfigManager();
 
         Text = "Synapse — Estatísticas & Backup do Cofre";
-        Size = new Size(740, 560);
+        Size = new Size(740, 580);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
-        Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
-        BackColor = Color.FromArgb(248, 250, 252);
+        SynapseTheme.ApplyFormChrome(this);
 
         // Header Panel
-        var pnlHeader = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = 60,
-            BackColor = Color.FromArgb(15, 23, 42),
-            Padding = new Padding(16, 10, 16, 10)
-        };
-
-        var lblTitle = new Label
-        {
-            Text = "📊 Métricas de Produtividade & Saúde do Cofre",
-            Font = new Font("Segoe UI", 12f, FontStyle.Bold),
-            ForeColor = Color.White,
-            Location = new Point(16, 8),
-            AutoSize = true
-        };
-
-        var lblSubtitle = new Label
-        {
-            Text = "Acompanhe seu volume de escrita, distribuição temática e gere backups seguros.",
-            Font = new Font("Segoe UI", 9f, FontStyle.Regular),
-            ForeColor = Color.FromArgb(148, 163, 184),
-            Location = new Point(16, 32),
-            AutoSize = true
-        };
-
-        pnlHeader.Controls.Add(lblTitle);
-        pnlHeader.Controls.Add(lblSubtitle);
+        var pnlHeader = SynapseTheme.CreateHeaderBar(
+            "📊 Métricas de Produtividade & Saúde do Cofre",
+            "Acompanhe seu volume de escrita, distribuição temática e gere backups seguros.",
+            64);
         Controls.Add(pnlHeader);
 
         // Cards Panel
         var pnlCards = new Panel
         {
-            Location = new Point(20, 80),
-            Size = new Size(685, 120)
+            Location = new Point(20, 84),
+            Size = new Size(685, 120),
+            BackColor = SynapseTheme.Background
         };
 
-        var card1 = CreateKpiCard("📝 Total de Notas", out _lblNotes, 0);
-        var card2 = CreateKpiCard("✍️ Volume de Palavras", out _lblWords, 175);
-        var card3 = CreateKpiCard("⏱️ Tempo de Leitura", out _lblReadingTime, 350);
-        var card4 = CreateKpiCard("⚡ Atividade Recente", out _lblRecentActivity, 525);
+        var card1 = CreateKpiCard("📝 Total de Notas", out _lblNotes, 0, SynapseTheme.AccentPrimary);
+        var card2 = CreateKpiCard("✍️ Volume de Palavras", out _lblWords, 172, SynapseTheme.AccentSecondary);
+        var card3 = CreateKpiCard("⏱️ Tempo de Leitura", out _lblReadingTime, 344, SynapseTheme.Warning);
+        var card4 = CreateKpiCard("⚡ Atividade Recente", out _lblRecentActivity, 516, SynapseTheme.AccentPrimary);
 
         pnlCards.Controls.Add(card1);
         pnlCards.Controls.Add(card2);
@@ -82,9 +59,10 @@ public sealed class VaultStatsForm : Form
         // Categories Header
         var lblCatHeader = new Label
         {
-            Text = "Distribuição por Categorias (PKM):",
-            Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-            Location = new Point(20, 215),
+            Text = "Distribuição por Categorias (PKM)",
+            Font = SynapseTheme.FontHeadline(10.5f),
+            ForeColor = SynapseTheme.TextPrimary,
+            Location = new Point(20, 220),
             AutoSize = true
         };
         Controls.Add(lblCatHeader);
@@ -92,12 +70,13 @@ public sealed class VaultStatsForm : Form
         // Categories ListView
         _lstCategories = new ListView
         {
-            Location = new Point(20, 240),
-            Size = new Size(685, 200),
+            Location = new Point(20, 248),
+            Size = new Size(685, 220),
             View = View.Details,
             FullRowSelect = true,
-            GridLines = true
+            GridLines = false
         };
+        SynapseTheme.StyleListView(_lstCategories);
         _lstCategories.Columns.Add("Categoria", 280);
         _lstCategories.Columns.Add("Quantidade de Notas", 160);
         _lstCategories.Columns.Add("Proporção", 200);
@@ -108,30 +87,25 @@ public sealed class VaultStatsForm : Form
         {
             Dock = DockStyle.Bottom,
             Height = 65,
-            BackColor = Color.FromArgb(241, 245, 249),
+            BackColor = SynapseTheme.SurfaceAlt,
             Padding = new Padding(16, 12, 16, 12)
         };
 
-        var btnRefresh = new Button
+        var btnRefresh = new SynapseButton
         {
             Text = "🔄 Atualizar Métricas",
             Location = new Point(20, 12),
             Size = new Size(160, 38),
-            BackColor = Color.FromArgb(226, 232, 240),
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+            Variant = SynapseButtonVariant.Secondary
         };
         btnRefresh.Click += async (_, _) => await LoadMetricsAsync();
 
-        _btnExportBackup = new Button
+        _btnExportBackup = new SynapseButton
         {
             Text = "🔒 Exportar Backup Criptografado...",
             Location = new Point(460, 12),
             Size = new Size(245, 38),
-            BackColor = Color.FromArgb(16, 185, 129),
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+            Variant = SynapseButtonVariant.Primary
         };
         _btnExportBackup.Click += async (_, _) => await ExportBackupAsync();
 
@@ -142,35 +116,39 @@ public sealed class VaultStatsForm : Form
         Shown += async (_, _) => await LoadMetricsAsync();
     }
 
-    private static Panel CreateKpiCard(string title, out Label valueLabel, int left)
+    private static Panel CreateKpiCard(string title, out Label valueLabel, int left, Color accentColor)
     {
-        var panel = new Panel
+        var panel = new RoundedPanel
         {
             Location = new Point(left, 0),
-            Size = new Size(160, 110),
-            BackColor = Color.White,
-            BorderStyle = BorderStyle.FixedSingle,
-            Padding = new Padding(10)
+            Size = new Size(160, 112),
+            BackColor = SynapseTheme.Surface,
+            BorderColor = SynapseTheme.Border,
+            Radius = SynapseTheme.RadiusMedium,
+            Padding = new Padding(12)
         };
+
+        var accentBar = new Panel { Location = new Point(0, 0), Size = new Size(36, 3), BackColor = accentColor };
 
         var lblT = new Label
         {
             Text = title,
-            Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
-            ForeColor = Color.FromArgb(100, 116, 139),
-            Location = new Point(10, 10),
-            Size = new Size(140, 20)
+            Font = SynapseTheme.FontBodyBold(8.5f),
+            ForeColor = SynapseTheme.TextSecondary,
+            Location = new Point(12, 14),
+            Size = new Size(136, 32)
         };
 
         valueLabel = new Label
         {
             Text = "...",
-            Font = new Font("Segoe UI", 13.5f, FontStyle.Bold),
-            ForeColor = Color.FromArgb(15, 23, 42),
-            Location = new Point(10, 38),
-            Size = new Size(140, 35)
+            Font = SynapseTheme.FontDisplay(15f),
+            ForeColor = SynapseTheme.TextPrimary,
+            Location = new Point(12, 62),
+            Size = new Size(136, 35)
         };
 
+        panel.Controls.Add(accentBar);
         panel.Controls.Add(lblT);
         panel.Controls.Add(valueLabel);
         return panel;
@@ -250,16 +228,18 @@ public sealed class VaultStatsForm : Form
         using var form = new Form
         {
             Text = "Criptografia de Backup",
-            Size = new Size(420, 180),
+            Size = new Size(420, 190),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
             MaximizeBox = false,
             MinimizeBox = false
         };
+        SynapseTheme.ApplyFormChrome(form);
 
-        var label = new Label { Text = message, Left = 20, Top = 15, Width = 360 };
-        var textBox = new TextBox { Left = 20, Top = 45, Width = 360, UseSystemPasswordChar = true };
-        var buttonOk = new Button { Text = "Criptografar", Left = 270, Top = 90, Width = 110, DialogResult = DialogResult.OK };
+        var label = new Label { Text = message, ForeColor = SynapseTheme.TextSecondary, Font = SynapseTheme.FontBody(9f), Left = 20, Top = 18, Width = 370 };
+        var textBox = new TextBox { Left = 20, Top = 46, Width = 370, UseSystemPasswordChar = true };
+        SynapseTheme.StyleInput(textBox);
+        var buttonOk = new SynapseButton { Text = "Criptografar", Variant = SynapseButtonVariant.Primary, Left = 260, Top = 95, Width = 130, Height = 34, DialogResult = DialogResult.OK };
 
         form.Controls.Add(label);
         form.Controls.Add(textBox);

@@ -19,6 +19,9 @@ public sealed class SynapseButton : Button
     public SynapseButtonVariant Variant { get; set; } = SynapseButtonVariant.Secondary;
     public int Radius { get; set; } = SynapseTheme.RadiusSmall;
 
+    /// <summary>Cor de preenchimento customizada, sobrepõe a cor da <see cref="Variant"/> (ex.: botões de avaliação semânticos).</summary>
+    public Color? FillOverride { get; set; }
+
     public SynapseButton()
     {
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer, true);
@@ -38,6 +41,12 @@ public sealed class SynapseButton : Button
         if (!Enabled)
         {
             return (SynapseTheme.Surface, SynapseTheme.Border, SynapseTheme.TextDisabled);
+        }
+
+        if (FillOverride is { } custom)
+        {
+            var fill = _pressed ? ControlPaint.Dark(custom, 0.15f) : _hovering ? ControlPaint.Light(custom, 0.1f) : custom;
+            return (fill, Color.Transparent, Color.White);
         }
 
         return Variant switch

@@ -26,4 +26,16 @@ public interface IBrainAiProvider
     /// com sucesso — nunca deve devolver o próprio prompt de entrada como resposta.
     /// </summary>
     Task<string> AskQuestionAsync(string prompt, CancellationToken ct = default);
+
+    /// <summary>
+    /// Processa um turno de conversa com o Segundo Cérebro, decidindo dinamicamente se
+    /// há informação para capturar como nota no cofre, se é uma pergunta a ser respondida via RAG,
+    /// ambos ou apenas small talk / confirmação.
+    /// </summary>
+    Task<ChatTurnResult> ProcessChatTurnAsync(
+        string userMessage,
+        IReadOnlyList<string> existingVaultNotes,
+        IReadOnlyList<string> existingCategoryFolders,
+        IReadOnlyList<SemanticSearchResult> relatedNotes,
+        CancellationToken ct = default);
 }

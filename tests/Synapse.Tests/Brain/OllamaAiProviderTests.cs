@@ -56,4 +56,19 @@ public class OllamaAiProviderTests
 
         ex.Message.ShouldNotContain("chave-secreta-456");
     }
+
+    [Fact]
+    public async Task ProcessChatTurnAsync_WhenSuccessful_ShouldReturnParsedResult()
+    {
+        var jsonResponse = @"{""response"":""{\""shouldCapture\"":true,\""title\"":\""Nota Local\""}""}";
+        var handler = new MockHttpMessageHandler(jsonResponse);
+        var httpClient = new HttpClient(handler);
+        var config = new BrainConfig { OllamaEndpoint = "http://localhost:11434", OllamaModel = "llama3" };
+        var provider = new OllamaAiProvider(config, httpClient);
+
+        var result = await provider.ProcessChatTurnAsync("mensagem de teste", [], [], []);
+
+        result.ShouldCapture.ShouldBeTrue();
+        result.Title.ShouldBe("Nota Local");
+    }
 }

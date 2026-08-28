@@ -40,3 +40,16 @@ public sealed class AiStructuredNote
     public string BodyMarkdown { get; set; } = string.Empty;
     public List<string> SuggestedConnections { get; set; } = [];
 }
+
+public sealed class ChatTurnResult
+{
+    public bool ShouldCapture { get; set; }
+    public string? Title { get; set; }
+    public string? Category { get; set; }
+    public List<string> Tags { get; set; } = [];
+    public string? BodyMarkdown { get; set; }
+    public List<string> KeyPoints { get; set; } = [];
+    public List<string> SuggestedConnections { get; set; } = [];
+    public bool ShouldAnswer { get; set; }
+    public string ReplyMessage { get; set; } = string.Empty;
+}

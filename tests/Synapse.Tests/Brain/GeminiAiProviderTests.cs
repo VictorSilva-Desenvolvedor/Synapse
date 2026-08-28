@@ -199,7 +199,7 @@ public class GeminiAiProviderTests
         var config = new BrainConfig
         {
             GeminiApiKey = "AIzaSyTestKey123",
-            GeminiModel = "gemini-1.5-flash"
+            GeminiModel = "gemini-3.6-flash"
         };
 
         var provider = new GeminiAiProvider(config, httpClient);
@@ -207,5 +207,121 @@ public class GeminiAiProviderTests
 
         moc.ShouldContain("# MOC - Arquitetura de Software");
         moc.ShouldContain("- [[Arquitetura Hexagonal]]");
+    }
+
+    [Fact]
+    public async Task ProcessChatTurnAsync_WhenShouldCapture_ShouldParseStructuredResult()
+    {
+        var captureResponseJson = @"{
+  ""candidates"": [
+    {
+      ""content"": {
+        ""parts"": [
+          {
+            ""text"": ""{\""shouldCapture\"": true, \""title\"": \""Demanda do Chefe — 2026-08-29 12h\"", \""category\"": \""Tarefa\"", \""tags\"": [\""trabalho\"", \""urgente\""], \""bodyMarkdown\"": \""Falar com o chefe sobre alinhamento de demandas.\"", \""keyPoints\"": [\""Alinhamento no almoço\""], \""suggestedConnections\"": [\""Reunioes\""], \""shouldAnswer\"": false, \""replyMessage\"": \""Anotado! Salvei a demanda com o chefe no seu cofre.\""}""
+          }
+        ]
+      }
+    }
+  ]
+}";
+        var handler = new MockHttpMessageHandler(captureResponseJson);
+        var httpClient = new HttpClient(handler);
+        var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-3.6-flash" };
+        var provider = new GeminiAiProvider(config, httpClient);
+
+        var result = await provider.ProcessChatTurnAsync(
+            "falei com meu chefe hoje tenho uma demanda amanha almoco",
+            ["Reunioes"],
+            ["Tarefa", "Projetos"],
+            []);
+
+        result.ShouldCapture.ShouldBeTrue();
+        result.ShouldAnswer.ShouldBeFalse();
+        result.Title.ShouldBe("Demanda do Chefe — 2026-08-29 12h");
+        result.Category.ShouldBe("Tarefa");
+        result.Tags.ShouldContain("trabalho");
+        result.KeyPoints.ShouldContain("Alinhamento no almoço");
+        result.ReplyMessage.ShouldContain("Anotado!");
+    }
+
+    [Fact]
+    public async Task ProcessChatTurnAsync_WhenShouldAnswer_ShouldParseAnswerResult()
+    {
+        var answerResponseJson = @"{
+  ""candidates"": [
+    {
+      ""content"": {
+        ""parts"": [
+          {
+            ""text"": ""{\""shouldCapture\"": false, \""title\"": null, \""category\"": null, \""tags\"": [], \""bodyMarkdown\"": null, \""keyPoints\"": [], \""suggestedConnections\"": [], \""shouldAnswer\"": true, \""replyMessage\"": \""Sua demanda com o chefe é amanhã às 12h, conforme anotado em [[Demanda do Chefe]].\""}""
+          }
+        ]
+      }
+    }
+  ]
+}";
+        var handler = new MockHttpMessageHandler(answerResponseJson);
+        var httpClient = new HttpClient(handler);
+        var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-3.6-flash" };
+        var provider = new GeminiAiProvider(config, httpClient);
+
+        var result = await provider.ProcessChatTurnAsync(
+            "que horas é minha demanda amanhã?",
+            ["Demanda do Chefe"],
+            ["Tarefa"],
+            [new SemanticSearchResult("Brain/Tarefa/Demanda do Chefe.md", "Demanda do Chefe", "Demanda amanhã às 12h.", 0.92f)]);
+
+        result.ShouldCapture.ShouldBeFalse();
+        result.ShouldAnswer.ShouldBeTrue();
+        result.ReplyMessage.ShouldContain("[[Demanda do Chefe]]");
+        result.ReplyMessage.ShouldContain("12h");
+    }
+
+    [Fact]
+    public async Task ProcessChatTurnAsync_WhenSmallTalk_ShouldReturnFriendlyReplyWithoutCaptureOrAnswer()
+    {
+        var smallTalkResponseJson = @"{
+  ""candidates"": [
+    {
+      ""content"": {
+        ""parts"": [
+          {
+            ""text"": ""{\""shouldCapture\"": false, \""title\"": null, \""category\"": null, \""tags\"": [], \""bodyMarkdown\"": null, \""keyPoints\"": [], \""suggestedConnections\"": [], \""shouldAnswer\"": false, \""replyMessage\"": \""De nada! Se precisar de mais alguma coisa, estou por aqui.\""}""
+          }
+        ]
+      }
+    }
+  ]
+}";
+        var handler = new MockHttpMessageHandler(smallTalkResponseJson);
+        var httpClient = new HttpClient(handler);
+        var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-3.6-flash" };
+        var provider = new GeminiAiProvider(config, httpClient);
+
+        var result = await provider.ProcessChatTurnAsync("valeu", ["Nota 1"], ["Ideia"], []);
+
+        result.ShouldCapture.ShouldBeFalse();
+        result.ShouldAnswer.ShouldBeFalse();
+        result.ReplyMessage.ShouldContain("De nada!");
+    }
+
+    [Fact]
+    public async Task ProcessChatTurnAsync_WhenAllAttemptsFail_ShouldThrowWithoutLeakingPrompt()
+    {
+        var handler = new SequenceHttpMessageHandler(
+            (HttpStatusCode.ServiceUnavailable, "{\"error\":\"indisponivel\"}"),
+            (HttpStatusCode.ServiceUnavailable, "{\"error\":\"indisponivel\"}"));
+        var httpClient = new HttpClient(handler);
+        var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-3.6-flash" };
+        var provider = new GeminiAiProvider(config, httpClient);
+
+        var secretMessage = "mensagem-secreta-com-chave-4214j21k4j2k";
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(
+            async () => await provider.ProcessChatTurnAsync(secretMessage, [], [], []));
+
+        handler.CallCount.ShouldBe(2);
+        ex.Message.ShouldNotContain(secretMessage);
     }
 }

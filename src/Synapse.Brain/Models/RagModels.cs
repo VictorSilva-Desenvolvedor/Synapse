@@ -16,3 +16,8 @@ public sealed record RagAnswer(
     string Question,
     string Answer,
     IReadOnlyList<SemanticSearchResult> Sources);
+
+public sealed record ChatTurnOutcome(
+    string ReplyMessage,
+    string? SavedNotePath,
+    IReadOnlyList<SemanticSearchResult> Sources);

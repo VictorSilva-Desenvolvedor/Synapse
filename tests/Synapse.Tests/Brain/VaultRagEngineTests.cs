@@ -176,6 +176,99 @@ public class VaultRagEngineTests : IDisposable
         File.Exists(fullPath).ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task ProcessChatTurnAsync_WhenShouldCapture_ShouldWriteStructuredNoteAndIndexItAndReturnOutcome()
+    {
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 0.8f, 0.6f, 0f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        mockAi.ProcessChatTurnAsync(
+            Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Any<IReadOnlyList<SemanticSearchResult>>(),
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new ChatTurnResult
+            {
+                ShouldCapture = true,
+                Title = "Demanda do Chefe — 2026-08-29 12h",
+                Category = "Tarefas",
+                Tags = ["trabalho", "demanda"],
+                BodyMarkdown = "Alinhar demandas com o chefe no almoço de amanhã.",
+                KeyPoints = ["Almoço 12h", "Demandas de Q3"],
+                SuggestedConnections = [],
+                ShouldAnswer = false,
+                ReplyMessage = "Anotado! Salvei a demanda com o chefe no seu cofre."
+            }));
+
+        var config = new BrainConfig { DefaultFolder = "Brain", AutoCategorizeFolders = true };
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi, config);
+
+        var outcome = await ragEngine.ProcessChatTurnAsync("falei com meu chefe hoje tenho uma demanda amanha almoco", _tempVaultDir);
+
+        outcome.ReplyMessage.ShouldContain("Anotado!");
+        outcome.SavedNotePath.ShouldNotBeNull();
+        outcome.SavedNotePath.ShouldBe("Brain/Tarefas/Demanda do Chefe — 2026-08-29 12h.md");
+        outcome.Sources.Count.ShouldBe(0);
+
+        var fullPath = Path.Combine(_tempVaultDir, outcome.SavedNotePath!);
+        File.Exists(fullPath).ShouldBeTrue();
+
+        var noteContent = await File.ReadAllTextAsync(fullPath);
+        noteContent.ShouldContain("titulo: \"Demanda do Chefe — 2026-08-29 12h\"");
+        noteContent.ShouldContain("categoria: \"Tarefas\"");
+        noteContent.ShouldContain("# Demanda do Chefe — 2026-08-29 12h");
+        noteContent.ShouldContain("Alinhar demandas com o chefe no almoço de amanhã.");
+        noteContent.ShouldContain("### Pontos-Chave");
+        noteContent.ShouldContain("- Almoço 12h");
+
+        // Confirma que a nova nota foi adicionada ao índice em memória e é encontrada em busca subsequente
+        var searchResults = await ragEngine.SearchAsync("chefe", _tempVaultDir);
+        searchResults.Count.ShouldBeGreaterThan(0);
+        searchResults.ShouldContain(r => r.Title == "Demanda do Chefe — 2026-08-29 12h");
+    }
+
+    [Fact]
+    public async Task ProcessChatTurnAsync_WhenShouldAnswerOnly_ShouldReturnAnswerAndSourcesWithoutCreatingFile()
+    {
+        var notePath = Path.Combine(_tempVaultDir, "Demanda.md");
+        await File.WriteAllTextAsync(notePath, "Demanda com o chefe agendada para 12h.");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 1f, 0f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        mockAi.ProcessChatTurnAsync(
+            Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Any<IReadOnlyList<SemanticSearchResult>>(),
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new ChatTurnResult
+            {
+                ShouldCapture = false,
+                ShouldAnswer = true,
+                ReplyMessage = "Sua demanda é às 12h conforme anotado em [[Demanda]]."
+            }));
+
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi);
+
+        var outcome = await ragEngine.ProcessChatTurnAsync("que horas é a demanda?", _tempVaultDir);
+
+        outcome.ReplyMessage.ShouldContain("12h");
+        outcome.SavedNotePath.ShouldBeNull();
+        outcome.Sources.Count.ShouldBeGreaterThan(0);
+        outcome.Sources[0].Title.ShouldBe("Demanda");
+
+        // Garante que nenhum novo arquivo foi criado
+        var files = Directory.GetFiles(_tempVaultDir, "*.md", SearchOption.AllDirectories);
+        files.Length.ShouldBe(1);
+        Path.GetFileName(files[0]).ShouldBe("Demanda.md");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempVaultDir))

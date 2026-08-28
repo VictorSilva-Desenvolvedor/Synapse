@@ -189,6 +189,164 @@ Conteúdo bruto a processar:
             $"Não foi possível obter resposta do Gemini após {maxAttempts} tentativas. Detalhe: {lastError?.Message}", lastError);
     }
 
+    public async Task<ChatTurnResult> ProcessChatTurnAsync(
+        string userMessage,
+        IReadOnlyList<string> existingVaultNotes,
+        IReadOnlyList<string> existingCategoryFolders,
+        IReadOnlyList<SemanticSearchResult> relatedNotes,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+        {
+            return new ChatTurnResult
+            {
+                ShouldCapture = false,
+                ShouldAnswer = false,
+                ReplyMessage = "Olá! Como posso ajudar você hoje?"
+            };
+        }
+
+        var apiKey = _config.GetEffectiveGeminiApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException(
+                "API Key do Gemini não configurada. Defina em Configurações ou na variável de ambiente GEMINI_API_KEY.");
+        }
+
+        var vaultNotesList = existingVaultNotes.Count > 0
+            ? string.Join(", ", existingVaultNotes.Take(40))
+            : "Nenhuma nota no cofre ainda";
+
+        var categoryFoldersList = existingCategoryFolders.Count > 0
+            ? string.Join(", ", existingCategoryFolders)
+            : "Nenhuma pasta específica";
+
+        var relatedNotesBuilder = new StringBuilder();
+        if (relatedNotes.Count > 0)
+        {
+            foreach (var note in relatedNotes)
+            {
+                relatedNotesBuilder.AppendLine($"- [[{note.Title}]]: {note.Excerpt}");
+            }
+        }
+        else
+        {
+            relatedNotesBuilder.AppendLine("Nenhuma nota diretamente relacionada encontrada.");
+        }
+
+        var prompt = $@"Você é o assistente inteligente de Segundo Cérebro (PKM) do Synapse integrado ao Obsidian.
+Analise a mensagem do usuário e decida dinamicamente se deve:
+1. CAPTURAR uma nova nota no cofre (ShouldCapture=true): quando houver QUALQUER informação concreta que valha a pena preservar (tarefas, compromissos, prazos, fatos, ideias, credenciais, referências, anotações de reunião).
+   - Nesse caso, defina:
+     * ""title"": título específico, claro e descritivo (ex.: 'Demanda do chefe — 2026-08-29 12h', 'Chave API desconhecida — d4214j21k4j2k'). Nunca use títulos genéricos como 'Nova Nota' ou 'Demanda'. Inclua data/hora inferida quando fizer sentido.
+     * ""category"": escolha uma das pastas existentes ({categoryFoldersList}) se fizer sentido, ou uma categoria padrão adequada ('Tarefa', 'Ideia', 'Referencia', 'Projeto', 'Conceito', 'Reuniao').
+     * ""tags"": lista de tags relevantes sem '#'.
+     * ""bodyMarkdown"": texto formatado em Markdown com todos os detalhes e contexto preservados.
+     * ""keyPoints"": lista de pontos-chave.
+     * ""suggestedConnections"": lista de títulos de notas existentes do cofre que se relacionam com o conteúdo.
+2. RESPONDER com base no cofre (ShouldAnswer=true): quando a mensagem for uma pergunta ou busca que possa ser respondida a partir das notas relacionadas fornecidas abaixo.
+   - Nesse caso, a resposta em Markdown deve ir em ""replyMessage"", citando as notas com wikilinks [[Nome da Nota]].
+3. REGRAS PARA O CAMPO ""replyMessage"":
+   - Se ShouldCapture=true e ShouldAnswer=false: ""replyMessage"" deve ser uma confirmação curta, natural e prestativa do que foi anotado/salvo no cofre.
+   - Se ShouldCapture=false e ShouldAnswer=false (small talk, saudação, agradecimento): ""replyMessage"" deve ser uma resposta conversacional breve e amigável, sem salvar nada.
+   - Se ShouldCapture=true e ShouldAnswer=true: responda à pergunta em ""replyMessage"" e confirme também a captura.
+
+Responda ESTRITAMENTE em formato JSON com o seguinte schema:
+{{
+  ""shouldCapture"": true | false,
+  ""title"": ""Título específico da nota se shouldCapture=true, ou null"",
+  ""category"": ""Categoria/pasta da nota se shouldCapture=true, ou null"",
+  ""tags"": [""tag1"", ""tag2""],
+  ""bodyMarkdown"": ""Conteúdo Markdown da nota se shouldCapture=true, ou null"",
+  ""keyPoints"": [""ponto 1"", ""ponto 2""],
+  ""suggestedConnections"": [""Nota Relacionada 1""],
+  ""shouldAnswer"": true | false,
+  ""replyMessage"": ""Resposta ao usuário ou confirmação amigável""
+}}
+
+Contexto do cofre:
+- Pastas/Categorias existentes no cofre: [{categoryFoldersList}]
+- Notas existentes no cofre para conexões: [{vaultNotesList}]
+- Notas relevantes encontradas por busca semântica (RAG):
+{relatedNotesBuilder}
+
+Mensagem do usuário:
+---
+{userMessage}
+---";
+
+        var requestBody = new
+        {
+            contents = new[]
+            {
+                new { parts = new[] { new { text = prompt } } }
+            },
+            generationConfig = new
+            {
+                response_mime_type = "application/json",
+                temperature = 0.3
+            }
+        };
+
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_config.GeminiModel}:generateContent?key={apiKey}";
+        var requestJson = JsonSerializer.Serialize(requestBody);
+
+        const int maxAttempts = 2;
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+                var response = await _httpClient.PostAsync(url, content, ct);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var jsonStr = await response.Content.ReadAsStringAsync(ct);
+                    using var doc = JsonDocument.Parse(jsonStr);
+                    var candidates = doc.RootElement.GetProperty("candidates");
+                    if (candidates.GetArrayLength() > 0)
+                    {
+                        var rawText = candidates[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString();
+                        if (!string.IsNullOrWhiteSpace(rawText))
+                        {
+                            var cleanJson = CleanJsonString(rawText);
+                            var parsed = JsonSerializer.Deserialize<ChatTurnResult>(cleanJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            if (parsed != null)
+                            {
+                                return parsed;
+                            }
+                        }
+                    }
+
+                    lastError = new InvalidOperationException("A API do Gemini respondeu com sucesso, mas sem JSON utilizável na resposta.");
+                }
+                else if ((int)response.StatusCode >= 500)
+                {
+                    lastError = new InvalidOperationException($"Gemini retornou {(int)response.StatusCode} {response.StatusCode}.");
+                }
+                else
+                {
+                    var errorBody = await response.Content.ReadAsStringAsync(ct);
+                    throw new InvalidOperationException($"Gemini retornou {(int)response.StatusCode} {response.StatusCode}: {errorBody}");
+                }
+            }
+            catch (Exception ex) when (ex is not InvalidOperationException && ex is not OperationCanceledException)
+            {
+                lastError = ex;
+            }
+
+            if (attempt < maxAttempts)
+            {
+                await Task.Delay(1500, ct);
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Não foi possível obter resposta do Gemini após {maxAttempts} tentativas. Detalhe: {lastError?.Message}", lastError);
+    }
+
     public async Task<string> GenerateMocAsync(
         string topic,
         IReadOnlyList<string> relatedNotes,

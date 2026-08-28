@@ -130,6 +130,114 @@ Entrada bruta do usuário:
         }
     }
 
+    public async Task<ChatTurnResult> ProcessChatTurnAsync(
+        string userMessage,
+        IReadOnlyList<string> existingVaultNotes,
+        IReadOnlyList<string> existingCategoryFolders,
+        IReadOnlyList<SemanticSearchResult> relatedNotes,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(userMessage))
+        {
+            return new ChatTurnResult
+            {
+                ShouldCapture = false,
+                ShouldAnswer = false,
+                ReplyMessage = "Olá! Como posso ajudar você hoje?"
+            };
+        }
+
+        var vaultNotesList = existingVaultNotes.Count > 0
+            ? string.Join(", ", existingVaultNotes.Take(30))
+            : "Nenhuma nota";
+
+        var categoryFoldersList = existingCategoryFolders.Count > 0
+            ? string.Join(", ", existingCategoryFolders)
+            : "Nenhuma pasta";
+
+        var relatedNotesBuilder = new StringBuilder();
+        if (relatedNotes.Count > 0)
+        {
+            foreach (var note in relatedNotes)
+            {
+                relatedNotesBuilder.AppendLine($"- [[{note.Title}]]: {note.Excerpt}");
+            }
+        }
+        else
+        {
+            relatedNotesBuilder.AppendLine("Nenhuma nota diretamente relacionada.");
+        }
+
+        var prompt = $@"Você é o assistente inteligente de Segundo Cérebro do Synapse para Obsidian.
+Analise a mensagem do usuário e responda ESTRITAMENTE em formato JSON com o seguinte schema:
+{{
+  ""shouldCapture"": true | false,
+  ""title"": ""Título específico e conciso se shouldCapture=true, ou null"",
+  ""category"": ""Categoria da nota se shouldCapture=true, ou null"",
+  ""tags"": [""tag1"", ""tag2""],
+  ""bodyMarkdown"": ""Conteúdo formatado em Markdown se shouldCapture=true, ou null"",
+  ""keyPoints"": [""ponto 1"", ""ponto 2""],
+  ""suggestedConnections"": [""Nota Relacionada""],
+  ""shouldAnswer"": true | false,
+  ""replyMessage"": ""Resposta direta ao usuário ou confirmação amigável do que foi salvo""
+}}
+
+Regras:
+1. ShouldCapture=true quando houver qualquer informação nova ou fato a registrar (compromissos, tarefas, prazos, credenciais, anotações).
+2. ShouldAnswer=true quando a mensagem for uma pergunta a ser respondida com base nas notas relacionadas abaixo (cite [[wikilinks]]).
+3. replyMessage deve ser uma confirmação curta do que foi salvo (se ShouldCapture=true e ShouldAnswer=false) ou resposta amigável (se small talk) ou a resposta à pergunta.
+
+Contexto:
+- Pastas/Categorias existentes: [{categoryFoldersList}]
+- Notas no cofre: [{vaultNotesList}]
+- Notas relacionadas (RAG):
+{relatedNotesBuilder}
+
+Mensagem do usuário:
+---
+{userMessage}
+---";
+
+        var requestBody = new
+        {
+            model = _config.OllamaModel,
+            prompt,
+            stream = false,
+            format = "json"
+        };
+
+        try
+        {
+            var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync($"{_config.OllamaEndpoint.TrimEnd('/')}/api/generate", content, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonStr = await response.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(jsonStr);
+                if (doc.RootElement.TryGetProperty("response", out var respElement))
+                {
+                    var innerJson = respElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(innerJson))
+                    {
+                        var parsed = JsonSerializer.Deserialize<ChatTurnResult>(innerJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (parsed != null) return parsed;
+                    }
+                }
+
+                throw new InvalidOperationException("O Ollama respondeu com sucesso, mas sem JSON utilizável na resposta.");
+            }
+
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"Ollama retornou {(int)response.StatusCode} {response.StatusCode}: {errorBody}");
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException && ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"Não foi possível contatar o Ollama em {_config.OllamaEndpoint}. Verifique se o serviço está rodando. Detalhe: {ex.Message}", ex);
+        }
+    }
+
     public async Task<string> GenerateMocAsync(
         string topic,
         IReadOnlyList<string> relatedNotes,

@@ -12,12 +12,14 @@ public sealed class VaultRagEngine : IVaultBrainQuery
 {
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly IBrainAiProvider _aiProvider;
+    private readonly BrainConfig _config;
     private readonly Dictionary<string, NoteEmbeddingEntry> _index = new(StringComparer.OrdinalIgnoreCase);
 
-    public VaultRagEngine(IEmbeddingProvider embeddingProvider, IBrainAiProvider aiProvider)
+    public VaultRagEngine(IEmbeddingProvider embeddingProvider, IBrainAiProvider aiProvider, BrainConfig? config = null)
     {
         _embeddingProvider = embeddingProvider;
         _aiProvider = aiProvider;
+        _config = config ?? new BrainConfig();
     }
 
     public async Task IndexVaultAsync(string vaultRootPath, CancellationToken ct = default)
@@ -175,6 +177,82 @@ Pergunta do usuário:
         await File.WriteAllTextAsync(targetFilePath, fullNoteMarkdown, Encoding.UTF8, ct);
 
         return Path.GetRelativePath(vaultRootPath, targetFilePath).Replace('\\', '/');
+    }
+
+    /// <summary>
+    /// Processa uma mensagem do usuário na conversa com o Segundo Cérebro, decidindo
+    /// se deve capturar nova nota, responder com base no cofre (RAG), ambos ou responder amigavelmente.
+    /// </summary>
+    public async Task<ChatTurnOutcome> ProcessChatTurnAsync(
+        string userMessage,
+        string vaultRootPath,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userMessage);
+        ArgumentException.ThrowIfNullOrWhiteSpace(vaultRootPath);
+
+        // 1. Busca semântica para notas relacionadas ao conteúdo da mensagem
+        var relatedNotes = await SearchAsync(userMessage, vaultRootPath, topK: 4, ct);
+
+        // 2. Levanta pastas de categorias existentes e títulos de notas para contextualização da IA
+        var existingCategoryFolders = NoteFileWriter.GetExistingCategoryFolders(vaultRootPath, _config.DefaultFolder);
+        var existingVaultNotes = NoteFileWriter.GetVaultNoteTitles(vaultRootPath);
+
+        // 3. Processa a intenção com o provedor de IA
+        var turnResult = await _aiProvider.ProcessChatTurnAsync(
+            userMessage,
+            existingVaultNotes,
+            existingCategoryFolders,
+            relatedNotes,
+            ct);
+
+        string? savedNotePath = null;
+
+        // 4. Se ShouldCapture=true, formata e grava a nova nota estruturada
+        if (turnResult.ShouldCapture)
+        {
+            var structured = new AiStructuredNote
+            {
+                Title = string.IsNullOrWhiteSpace(turnResult.Title) ? "Nova Anotacao" : turnResult.Title,
+                Category = string.IsNullOrWhiteSpace(turnResult.Category) ? "Conceito" : turnResult.Category,
+                Tags = turnResult.Tags ?? [],
+                Summary = turnResult.KeyPoints.Count > 0 ? string.Join("; ", turnResult.KeyPoints) : string.Empty,
+                KeyPoints = turnResult.KeyPoints ?? [],
+                BodyMarkdown = string.IsNullOrWhiteSpace(turnResult.BodyMarkdown) ? userMessage : turnResult.BodyMarkdown,
+                SuggestedConnections = turnResult.SuggestedConnections ?? []
+            };
+
+            savedNotePath = await NoteFileWriter.WriteStructuredNoteAsync(
+                structured,
+                vaultRootPath,
+                _config,
+                existingVaultNotes,
+                ct);
+
+            // Atualiza o índice vetorial em memória para a nota nova sem precisar reindexar todo o cofre
+            var fullSavedPath = Path.Combine(vaultRootPath, savedNotePath);
+            if (File.Exists(fullSavedPath))
+            {
+                try
+                {
+                    var noteContent = await File.ReadAllTextAsync(fullSavedPath, ct);
+                    var vector = await _embeddingProvider.GenerateEmbeddingAsync(noteContent, ct);
+                    var hash = ComputeSha256(noteContent);
+                    _index[savedNotePath] = new NoteEmbeddingEntry(savedNotePath, hash, vector, DateTimeOffset.UtcNow);
+                }
+                catch
+                {
+                    // Falha silenciosa de embedding na nota nova não impede o sucesso do chat
+                }
+            }
+        }
+
+        // 5. Determina fontes: se ShouldAnswer=true, retorna as fontes consultadas; se não, lista vazia
+        IReadOnlyList<SemanticSearchResult> sources = turnResult.ShouldAnswer
+            ? relatedNotes
+            : [];
+
+        return new ChatTurnOutcome(turnResult.ReplyMessage, savedNotePath, sources);
     }
 
     private static string BuildAnswerNote(RagAnswer answer)

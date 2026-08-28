@@ -34,8 +34,8 @@ public sealed class ChatVaultForm : Form
 
         // Header Panel
         var pnlHeader = SynapseTheme.CreateHeaderBar(
-            "💬 Conversar com o Segundo Cérebro (RAG)",
-            "Faça perguntas em linguagem natural sobre qualquer assunto anotado no seu cofre do Obsidian.",
+            "💬 Conversar com o Segundo Cérebro",
+            "Guarde pensamentos, tarefas ou tire dúvidas sobre as suas anotações do cofre.",
             64);
         Controls.Add(pnlHeader);
 
@@ -116,8 +116,8 @@ public sealed class ChatVaultForm : Form
 
         _btnSend = new SynapseButton
         {
-            Text = "Perguntar ao Cofre",
-            Width = 160,
+            Text = "Enviar",
+            Width = 120,
             Height = 36,
             Variant = SynapseButtonVariant.Secondary,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
@@ -180,13 +180,13 @@ public sealed class ChatVaultForm : Form
         var embeddingProvider = new GeminiEmbeddingProvider(brainConfig);
         var aiProvider = new GeminiAiProvider(brainConfig);
 
-        _ragEngine = new VaultRagEngine(embeddingProvider, aiProvider);
+        _ragEngine = new VaultRagEngine(embeddingProvider, aiProvider, brainConfig);
 
         _lblStatus.Text = "Indexando notas do cofre...";
         await Task.Run(async () => await _ragEngine.IndexVaultAsync(_vaultPath));
 
-        _lblStatus.Text = "Pronto para responder perguntas sobre o seu cofre.";
-        AppendMessage("Synapse Brain", "Olá! Sou o assistente de inteligência do seu Segundo Cérebro. O que você gostaria de pesquisar ou relembrar hoje?");
+        _lblStatus.Text = "Pronto para conversar com o seu Segundo Cérebro.";
+        AppendMessage("Synapse Brain", "Olá! Sou o assistente de inteligência do seu Segundo Cérebro. Pronto. Pode me contar o que quiser guardar, ou perguntar algo sobre o seu cofre.");
     }
 
     private async Task SendQuestionAsync()
@@ -197,24 +197,40 @@ public sealed class ChatVaultForm : Form
         _txtInput.Text = "";
         _btnSend.Enabled = false;
         _btnSaveNote.Enabled = false;
-        _lblStatus.Text = "Pesquisando no cofre e gerando resposta...";
+        _lblStatus.Text = "Processando mensagem...";
 
         AppendMessage("Você", question);
 
         try
         {
-            var answer = await Task.Run(async () => await _ragEngine.AskVaultAsync(question, _vaultPath));
+            var outcome = await Task.Run(async () => await _ragEngine.ProcessChatTurnAsync(question, _vaultPath));
 
-            _lastAnswer = answer;
-            AppendMessage("Synapse Brain", answer.Answer);
-            UpdateSourcesList(answer.Sources);
-            _btnSaveNote.Enabled = true;
-            _lblStatus.Text = "Pronto.";
+            AppendMessage("Synapse Brain", outcome.ReplyMessage);
+
+            if (!string.IsNullOrWhiteSpace(outcome.SavedNotePath))
+            {
+                AppendMessage("Sistema", $"💾 Salvo em: [[{Path.GetFileNameWithoutExtension(outcome.SavedNotePath)}]] ({outcome.SavedNotePath})");
+            }
+
+            if (outcome.Sources.Count > 0)
+            {
+                UpdateSourcesList(outcome.Sources);
+                _lastAnswer = new RagAnswer(question, outcome.ReplyMessage, outcome.Sources);
+                _btnSaveNote.Enabled = true;
+            }
+            else
+            {
+                _lstSources.Items.Clear();
+                _lastAnswer = null;
+                _btnSaveNote.Enabled = false;
+            }
+
+            _lblStatus.Text = outcome.SavedNotePath != null ? $"Nota salva em {outcome.SavedNotePath}" : "Pronto.";
         }
         catch (Exception ex)
         {
-            AppendMessage("Sistema", $"Erro ao consultar cofre: {ex.Message}");
-            _lblStatus.Text = "Erro na consulta.";
+            AppendMessage("Sistema", $"Erro ao processar mensagem: {ex.Message}");
+            _lblStatus.Text = "Erro na conversa.";
         }
         finally
         {

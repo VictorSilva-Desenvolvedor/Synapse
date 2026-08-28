@@ -335,5 +335,23 @@ regras:
         {
             return Task.FromResult("Resposta de teste E2E.");
         }
+
+        public Task<ChatTurnResult> ProcessChatTurnAsync(
+            string userMessage,
+            IReadOnlyList<string> existingVaultNotes,
+            IReadOnlyList<string> existingCategoryFolders,
+            IReadOnlyList<SemanticSearchResult> relatedNotes,
+            CancellationToken ct = default)
+        {
+            return Task.FromResult(new ChatTurnResult
+            {
+                ShouldCapture = true,
+                Title = "Artigo de Teste Real",
+                Category = "Referencia",
+                Tags = ["artigo", "e2e"],
+                BodyMarkdown = "# Artigo de Teste Real\n\nConteúdo capturado com sucesso.",
+                ReplyMessage = "Anotado no cofre com sucesso."
+            });
+        }
     }
 }

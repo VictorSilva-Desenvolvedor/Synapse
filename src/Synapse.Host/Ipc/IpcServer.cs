@@ -57,7 +57,7 @@ public sealed class IpcServer : IAsyncDisposable
 
                 using var reg = ct.Register(state => ((IDisposable)state!).Dispose(), pipeServer);
                 await pipeServer.WaitForConnectionAsync(ct);
-                _ = HandleClientConnectionAsync(pipeServer, ct);
+                _ = Task.Run(() => HandleClientConnectionAsync(pipeServer, ct), ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -112,8 +112,8 @@ public sealed class IpcServer : IAsyncDisposable
     private async Task HandleClientConnectionAsync(NamedPipeServerStream pipe, CancellationToken ct)
     {
         _logger?.LogInformation("Novo cliente conectado ao Named Pipe IPC.");
-        using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
-        using var writer = new StreamWriter(pipe, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+        using var reader = new StreamReader(pipe, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
+        using var writer = new StreamWriter(pipe, new UTF8Encoding(false), bufferSize: 1024, leaveOpen: true) { AutoFlush = true };
 
         lock (_clientsLock)
         {
@@ -126,6 +126,9 @@ public sealed class IpcServer : IAsyncDisposable
             {
                 var line = await reader.ReadLineAsync(ct);
                 if (line == null) break;
+
+                line = line.TrimStart('\uFEFF').Trim();
+                if (string.IsNullOrWhiteSpace(line)) continue;
 
                 var envelope = JsonSerializer.Deserialize<IpcEnvelope>(line);
                 if (envelope == null) continue;

@@ -49,8 +49,8 @@ public sealed class IpcClient : IAsyncDisposable
             _pipeClient = new NamedPipeClientStream(_serverName, _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             await _pipeClient.ConnectAsync(timeoutMs, ct);
 
-            _reader = new StreamReader(_pipeClient, Encoding.UTF8, leaveOpen: true);
-            _writer = new StreamWriter(_pipeClient, Encoding.UTF8, leaveOpen: true) { AutoFlush = true };
+            _reader = new StreamReader(_pipeClient, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: true, leaveOpen: true);
+            _writer = new StreamWriter(_pipeClient, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
 
             ConnectionChanged?.Invoke(this, true);
             return true;

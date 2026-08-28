@@ -299,7 +299,7 @@ public sealed class TrayApplicationContext : ApplicationContext
                 var brainConfig = new BrainConfig
                 {
                     GeminiApiKey = config.GeminiApiKey,
-                    GeminiModel = string.IsNullOrWhiteSpace(config.GeminiModel) ? "gemini-1.5-flash" : config.GeminiModel
+                    GeminiModel = string.IsNullOrWhiteSpace(config.GeminiModel) ? "gemini-flash-latest" : config.GeminiModel
                 };
                 var embeddingProvider = new GeminiEmbeddingProvider(brainConfig);
                 var aiProvider = new GeminiAiProvider(brainConfig);

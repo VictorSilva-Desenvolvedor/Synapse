@@ -330,5 +330,10 @@ regras:
         {
             return Task.FromResult($"# MOC: {topic}\n- [[Artigo de Teste Real]]");
         }
+
+        public Task<string> AskQuestionAsync(string prompt, CancellationToken ct = default)
+        {
+            return Task.FromResult("Resposta de teste E2E.");
+        }
     }
 }

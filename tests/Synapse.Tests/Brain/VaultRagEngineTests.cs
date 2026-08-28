@@ -59,13 +59,8 @@ public class VaultRagEngineTests : IDisposable
             .Returns(Task.FromResult(new float[] { 1f, 1f, 1f }));
 
         var mockAi = Substitute.For<IBrainAiProvider>();
-        mockAi.ProcessRawNoteAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<string>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new AiStructuredNote
-            {
-                Title = "Resposta RAG",
-                BodyMarkdown = "O projeto utiliza a [[Arquitetura]] Hexagonal.",
-                Summary = "O projeto utiliza a [[Arquitetura]] Hexagonal."
-            }));
+        mockAi.AskQuestionAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult("O projeto utiliza a [[Arquitetura]] Hexagonal."));
 
         var ragEngine = new VaultRagEngine(mockEmbedding, mockAi);
         var answer = await ragEngine.AskVaultAsync("Qual é o padrão arquitetural do Synapse?", _tempVaultDir);
@@ -73,6 +68,30 @@ public class VaultRagEngineTests : IDisposable
         answer.Answer.ShouldContain("Hexagonal");
         answer.Sources.Count.ShouldBeGreaterThan(0);
         answer.Sources[0].Title.ShouldBe("Arquitetura");
+    }
+
+    [Fact]
+    public async Task AskVaultAsync_WhenAiProviderFails_ShouldPropagateExceptionWithoutLeakingPrompt()
+    {
+        var notePath = Path.Combine(_tempVaultDir, "Segredo.md");
+        await File.WriteAllTextAsync(notePath, "Conteúdo sensível que não deve vazar em nenhuma mensagem de erro visível.");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 1f, 1f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        mockAi.AskQuestionAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<string>(new InvalidOperationException("Gemini indisponível no momento.")));
+
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi);
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(
+            async () => await ragEngine.AskVaultAsync("O que tem na nota secreta?", _tempVaultDir));
+
+        ex.Message.ShouldNotContain("Notas do cofre relevantes");
+        ex.Message.ShouldNotContain("Conteúdo sensível");
+        ex.Message.ShouldContain("Gemini indisponível");
     }
 
     [Fact]

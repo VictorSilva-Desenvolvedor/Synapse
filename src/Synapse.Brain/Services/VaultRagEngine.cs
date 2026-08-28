@@ -139,11 +139,7 @@ Notas do cofre relevantes:
 Pergunta do usuário:
 ""{question}""";
 
-        // Chama o processamento de texto da IA
-        var structured = await _aiProvider.ProcessRawNoteAsync(prompt, topNotes.Select(n => n.Title).ToList(), ct);
-        var answer = string.IsNullOrWhiteSpace(structured.BodyMarkdown)
-            ? structured.Summary
-            : structured.BodyMarkdown;
+        var answer = await _aiProvider.AskQuestionAsync(prompt, ct);
 
         return new RagAnswer(question, answer, topNotes);
     }

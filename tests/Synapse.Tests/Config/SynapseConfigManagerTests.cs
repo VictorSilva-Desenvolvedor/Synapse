@@ -23,6 +23,8 @@ public class SynapseConfigManagerTests : IDisposable
         config.IsConfigured.ShouldBeFalse();
         config.Repository.ShouldBe("Synapse-Vault");
         config.Branch.ShouldBe("main");
+        config.GeminiModel.ShouldNotBe("gemini-1.5-flash");
+        config.GeminiModel.ShouldNotBe("gemini-2.5-flash");
     }
 
     [Fact]

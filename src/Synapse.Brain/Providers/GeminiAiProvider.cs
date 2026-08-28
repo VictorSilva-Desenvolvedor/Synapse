@@ -8,7 +8,9 @@ namespace Synapse.Brain.Providers;
 
 /// <summary>
 /// Provedor principal de inteligência artificial usando a API oficial do Google Gemini (Free Tier).
-/// Suporta o modelo gemini-1.5-flash com modo JSON estruturado nativo.
+/// Usa o alias "gemini-flash-latest" (sempre aponta pro modelo flash atual do Google) por padrão,
+/// já que versões fixas específicas (ex.: gemini-1.5-flash, gemini-2.5-flash) são descontinuadas
+/// periodicamente pelo Google. Suporta modo JSON estruturado nativo.
 /// </summary>
 public sealed class GeminiAiProvider : IBrainAiProvider
 {
@@ -106,6 +108,82 @@ Conteúdo bruto a processar:
         }
 
         return FallbackHeuristicProcessing(rawInput, existingVaultNotes);
+    }
+
+    public async Task<string> AskQuestionAsync(string prompt, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+
+        var apiKey = _config.GetEffectiveGeminiApiKey();
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException(
+                "API Key do Gemini não configurada. Defina em Configurações ou na variável de ambiente GEMINI_API_KEY.");
+        }
+
+        var requestBody = new
+        {
+            contents = new[]
+            {
+                new { parts = new[] { new { text = prompt } } }
+            }
+        };
+
+        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{_config.GeminiModel}:generateContent?key={apiKey}";
+        var requestJson = JsonSerializer.Serialize(requestBody);
+
+        const int maxAttempts = 2;
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+                var response = await _httpClient.PostAsync(url, content, ct);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var jsonStr = await response.Content.ReadAsStringAsync(ct);
+                    using var doc = JsonDocument.Parse(jsonStr);
+                    var candidates = doc.RootElement.GetProperty("candidates");
+                    if (candidates.GetArrayLength() > 0)
+                    {
+                        var text = candidates[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString();
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            return text;
+                        }
+                    }
+
+                    lastError = new InvalidOperationException("A API do Gemini respondeu com sucesso, mas sem texto utilizável na resposta.");
+                }
+                else if ((int)response.StatusCode >= 500)
+                {
+                    // Erro transitório do servidor: elegível para retry.
+                    lastError = new InvalidOperationException($"Gemini retornou {(int)response.StatusCode} {response.StatusCode}.");
+                }
+                else
+                {
+                    // Erro do cliente (chave inválida, modelo inexistente, etc.) — não adianta tentar de novo.
+                    var errorBody = await response.Content.ReadAsStringAsync(ct);
+                    throw new InvalidOperationException($"Gemini retornou {(int)response.StatusCode} {response.StatusCode}: {errorBody}");
+                }
+            }
+            catch (Exception ex) when (ex is not InvalidOperationException && ex is not OperationCanceledException)
+            {
+                // Falha de rede/transporte: elegível para retry.
+                lastError = ex;
+            }
+
+            if (attempt < maxAttempts)
+            {
+                await Task.Delay(1500, ct);
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Não foi possível obter resposta do Gemini após {maxAttempts} tentativas. Detalhe: {lastError?.Message}", lastError);
     }
 
     public async Task<string> GenerateMocAsync(

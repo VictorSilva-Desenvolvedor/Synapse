@@ -18,4 +18,12 @@ public interface IBrainAiProvider
         string topic,
         IReadOnlyList<string> relatedNotes,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Envia um prompt de texto livre e devolve a resposta da IA em Markdown, sem
+    /// forçar nenhum schema JSON. Usado para perguntas e respostas (RAG), onde não
+    /// existe "nota estruturada" para produzir. Lança exceção se a IA não responder
+    /// com sucesso — nunca deve devolver o próprio prompt de entrada como resposta.
+    /// </summary>
+    Task<string> AskQuestionAsync(string prompt, CancellationToken ct = default);
 }

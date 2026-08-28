@@ -88,6 +88,48 @@ Entrada bruta do usuário:
         return FallbackHeuristicProcessing(rawInput, existingVaultNotes);
     }
 
+    public async Task<string> AskQuestionAsync(string prompt, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+
+        var requestBody = new
+        {
+            model = _config.OllamaModel,
+            prompt,
+            stream = false
+        };
+
+        try
+        {
+            var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync($"{_config.OllamaEndpoint.TrimEnd('/')}/api/generate", content, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var jsonStr = await response.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(jsonStr);
+                if (doc.RootElement.TryGetProperty("response", out var respElement))
+                {
+                    var text = respElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        return text;
+                    }
+                }
+
+                throw new InvalidOperationException("O Ollama respondeu com sucesso, mas sem texto utilizável na resposta.");
+            }
+
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"Ollama retornou {(int)response.StatusCode} {response.StatusCode}: {errorBody}");
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException && ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"Não foi possível contatar o Ollama em {_config.OllamaEndpoint}. Verifique se o serviço está rodando. Detalhe: {ex.Message}", ex);
+        }
+    }
+
     public async Task<string> GenerateMocAsync(
         string topic,
         IReadOnlyList<string> relatedNotes,

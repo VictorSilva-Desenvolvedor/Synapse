@@ -76,6 +76,106 @@ public class GeminiAiProviderTests
         result.Tags.ShouldContain("cerebro");
     }
 
+    private class SequenceHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Queue<(HttpStatusCode StatusCode, string Content)> _responses;
+        public int CallCount { get; private set; }
+
+        public SequenceHttpMessageHandler(params (HttpStatusCode StatusCode, string Content)[] responses)
+        {
+            _responses = new Queue<(HttpStatusCode, string)>(responses);
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            var (statusCode, content) = _responses.Count > 0 ? _responses.Dequeue() : _responses.Last();
+            var response = new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(content, System.Text.Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }
+    }
+
+    private const string ValidTextResponse = @"{
+  ""candidates"": [
+    { ""content"": { ""parts"": [ { ""text"": ""Resposta de teste em Markdown."" } ] } }
+  ]
+}";
+
+    [Fact]
+    public async Task AskQuestionAsync_WhenSuccessful_ShouldReturnPlainTextAnswer()
+    {
+        var handler = new SequenceHttpMessageHandler((HttpStatusCode.OK, ValidTextResponse));
+        var httpClient = new HttpClient(handler);
+        var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-flash-latest" };
+        var provider = new GeminiAiProvider(config, httpClient);
+
+        var answer = await provider.AskQuestionAsync("Pergunta de teste");
+
+        answer.ShouldBe("Resposta de teste em Markdown.");
+        handler.CallCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task AskQuestionAsync_WhenFirstAttemptIs503_ShouldRetryOnceAndSucceed()
+    {
+        var handler = new SequenceHttpMessageHandler(
+            (HttpStatusCode.ServiceUnavailable, "{\"error\":\"indisponivel\"}"),
+            (HttpStatusCode.OK, ValidTextResponse));
+        var httpClient = new HttpClient(handler);
+        var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-flash-latest" };
+        var provider = new GeminiAiProvider(config, httpClient);
+
+        var answer = await provider.AskQuestionAsync("Pergunta de teste");
+
+        answer.ShouldBe("Resposta de teste em Markdown.");
+        handler.CallCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task AskQuestionAsync_WhenAllAttemptsFail_ShouldThrowWithoutLeakingPrompt()
+    {
+        var handler = new SequenceHttpMessageHandler(
+            (HttpStatusCode.ServiceUnavailable, "{\"error\":\"indisponivel\"}"),
+            (HttpStatusCode.ServiceUnavailable, "{\"error\":\"indisponivel\"}"));
+        var httpClient = new HttpClient(handler);
+        var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-flash-latest" };
+        var provider = new GeminiAiProvider(config, httpClient);
+
+        var secretPrompt = "Notas do cofre relevantes: --- INÍCIO DA NOTA: [[api]] --- chave-secreta-123 --- FIM DA NOTA ---";
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(
+            async () => await provider.AskQuestionAsync(secretPrompt));
+
+        handler.CallCount.ShouldBe(2);
+        ex.Message.ShouldNotContain("chave-secreta-123");
+    }
+
+    [Fact]
+    public async Task AskQuestionAsync_When4xxError_ShouldFailImmediatelyWithoutRetry()
+    {
+        var handler = new SequenceHttpMessageHandler(
+            (HttpStatusCode.NotFound, "{\"error\":{\"message\":\"models/x is not found\"}}"));
+        var httpClient = new HttpClient(handler);
+        var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-modelo-invalido" };
+        var provider = new GeminiAiProvider(config, httpClient);
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            async () => await provider.AskQuestionAsync("Pergunta de teste"));
+
+        handler.CallCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public void GeminiModel_DefaultValue_ShouldNotBeAKnownDiscontinuedModel()
+    {
+        var config = new BrainConfig();
+        config.GeminiModel.ShouldNotBe("gemini-1.5-flash");
+        config.GeminiModel.ShouldNotBe("gemini-2.5-flash");
+    }
+
     [Fact]
     public async Task GenerateMocAsync_WhenApiKeyConfigured_ShouldReturnMoc()
     {

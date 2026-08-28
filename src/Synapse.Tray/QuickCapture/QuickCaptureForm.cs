@@ -3,6 +3,7 @@ using Synapse.Brain.Ports;
 using Synapse.Brain.Providers;
 using Synapse.Brain.Services;
 using Synapse.Sync.Config;
+using Synapse.Tray.UI;
 
 namespace Synapse.Tray.QuickCapture;
 
@@ -14,8 +15,8 @@ public sealed class QuickCaptureForm : Form
     private readonly RichTextBox _txtInput;
     private readonly ComboBox _cmbProvider;
     private readonly Label _lblStatus;
-    private readonly Button _btnProcessAi;
-    private readonly Button _btnSaveRaw;
+    private readonly SynapseButton _btnProcessAi;
+    private readonly SynapseButton _btnSaveRaw;
     private readonly SynapseConfigManager _configManager;
 
     public QuickCaptureForm(SynapseConfigManager? configManager = null)
@@ -23,54 +24,34 @@ public sealed class QuickCaptureForm : Form
         _configManager = configManager ?? new SynapseConfigManager();
 
         Text = "Synapse — Captura Rápida (Segundo Cérebro)";
-        Size = new Size(680, 480);
+        Size = new Size(680, 500);
         StartPosition = FormStartPosition.CenterScreen;
-        Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
+        SynapseTheme.ApplyFormChrome(this);
 
         // Header Panel
-        var pnlHeader = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = 60,
-            BackColor = Color.FromArgb(24, 24, 27)
-        };
-
-        var lblTitle = new Label
-        {
-            Text = "🧠 Captura Inteligente para o Segundo Cérebro",
-            Font = new Font("Segoe UI", 11.5f, FontStyle.Bold),
-            ForeColor = Color.White,
-            Location = new Point(16, 10),
-            AutoSize = true
-        };
-
-        var lblSubtitle = new Label
-        {
-            Text = "Digite uma ideia, link ou anotação. A IA estrutura, adiciona tags e conecta com seu cofre.",
-            Font = new Font("Segoe UI", 9f, FontStyle.Regular),
-            ForeColor = Color.FromArgb(161, 161, 170),
-            Location = new Point(16, 34),
-            AutoSize = true
-        };
-
-        pnlHeader.Controls.Add(lblTitle);
-        pnlHeader.Controls.Add(lblSubtitle);
+        var pnlHeader = SynapseTheme.CreateHeaderBar(
+            "🧠 Captura Inteligente para o Segundo Cérebro",
+            "Digite uma ideia, link ou anotação. A IA estrutura, adiciona tags e conecta com seu cofre.",
+            64);
         Controls.Add(pnlHeader);
 
         // Body Input Panel
         var pnlBody = new Panel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(16, 12, 16, 12)
+            Padding = new Padding(16, 14, 16, 14),
+            BackColor = SynapseTheme.Background
         };
 
         _txtInput = new RichTextBox
         {
             Dock = DockStyle.Fill,
-            Font = new Font("Segoe UI", 10.5f, FontStyle.Regular),
-            BackColor = Color.FromArgb(250, 250, 250)
+            Font = new Font(SynapseTheme.FontFamily, 10.5f, FontStyle.Regular),
+            BackColor = SynapseTheme.SurfaceAlt,
+            ForeColor = SynapseTheme.TextPrimary,
+            BorderStyle = BorderStyle.FixedSingle
         };
         pnlBody.Controls.Add(_txtInput);
         Controls.Add(pnlBody);
@@ -79,24 +60,29 @@ public sealed class QuickCaptureForm : Form
         var pnlFooter = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 85,
-            BackColor = Color.FromArgb(244, 244, 245),
-            Padding = new Padding(16, 10, 16, 10)
+            Height = 90,
+            BackColor = SynapseTheme.SurfaceAlt,
+            Padding = new Padding(16, 12, 16, 12)
         };
 
         var lblProvider = new Label
         {
             Text = "Provedor IA:",
-            Location = new Point(16, 14),
+            Location = new Point(16, 16),
             AutoSize = true,
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+            ForeColor = SynapseTheme.TextSecondary,
+            Font = SynapseTheme.FontBodyBold(9f)
         };
 
         _cmbProvider = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(100, 10),
-            Width = 190
+            Location = new Point(100, 12),
+            Width = 190,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = SynapseTheme.SurfaceInput,
+            ForeColor = SynapseTheme.TextPrimary,
+            Font = SynapseTheme.FontBody()
         };
         _cmbProvider.Items.Add("Google Gemini (Free Tier)");
         _cmbProvider.Items.Add("Ollama (Local Offline)");
@@ -105,30 +91,29 @@ public sealed class QuickCaptureForm : Form
         _lblStatus = new Label
         {
             Text = "Pronto.",
-            ForeColor = Color.FromArgb(113, 113, 122),
-            Location = new Point(16, 50),
+            ForeColor = SynapseTheme.TextSecondary,
+            Font = SynapseTheme.FontCaption(),
+            Location = new Point(16, 54),
             AutoSize = true
         };
 
-        _btnSaveRaw = new Button
+        _btnSaveRaw = new SynapseButton
         {
             Text = "Salvar sem IA",
             Location = new Point(370, 10),
             Width = 110,
-            Height = 35
+            Height = 36,
+            Variant = SynapseButtonVariant.Secondary
         };
         _btnSaveRaw.Click += async (_, _) => await SaveRawNoteAsync();
 
-        _btnProcessAi = new Button
+        _btnProcessAi = new SynapseButton
         {
-            Text = "Processar com Gemini & Salvar",
+            Text = "Processar com IA & Salvar",
             Location = new Point(490, 10),
             Width = 180,
-            Height = 35,
-            BackColor = Color.FromArgb(16, 185, 129),
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+            Height = 36,
+            Variant = SynapseButtonVariant.Primary
         };
         _btnProcessAi.Click += async (_, _) => await ProcessWithAiAndSaveAsync();
 

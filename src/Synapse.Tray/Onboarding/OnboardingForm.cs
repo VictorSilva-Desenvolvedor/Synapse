@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Synapse.Sync.Auth;
 using Synapse.Sync.Config;
 using Synapse.Sync.GitHub;
+using Synapse.Tray.UI;
 
 namespace Synapse.Tray.Onboarding;
 
@@ -12,16 +13,16 @@ namespace Synapse.Tray.Onboarding;
 public sealed class OnboardingForm : Form
 {
     private readonly TextBox _txtToken;
-    private readonly Button _btnValidateToken;
+    private readonly SynapseButton _btnValidateToken;
     private readonly Label _lblTokenStatus;
     private readonly TextBox _txtVaultPath;
-    private readonly Button _btnBrowseVault;
+    private readonly SynapseButton _btnBrowseVault;
     private readonly TextBox _txtOwner;
     private readonly TextBox _txtRepo;
     private readonly CheckBox _chkAutoCreate;
     private readonly TextBox _txtGeminiApiKey;
-    private readonly Button _btnSave;
-    private readonly Button _btnCancel;
+    private readonly SynapseButton _btnSave;
+    private readonly SynapseButton _btnCancel;
 
     private readonly SynapseConfigManager _configManager;
     private readonly ITokenStore _tokenStore;
@@ -38,235 +39,177 @@ public sealed class OnboardingForm : Form
         _httpClient = httpClient ?? new HttpClient();
 
         Text = "Synapse — Configuração Inicial";
-        Size = new Size(620, 590);
+        Size = new Size(640, 660);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+        SynapseTheme.ApplyFormChrome(this);
 
-        // Header Panel
-        var pnlHeader = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = 65,
-            BackColor = Color.FromArgb(24, 24, 27)
-        };
-
-        var lblHeaderTitle = new Label
-        {
-            Text = "Configuração do Synapse",
-            Font = new Font("Segoe UI", 12f, FontStyle.Bold),
-            ForeColor = Color.White,
-            Location = new Point(20, 12),
-            AutoSize = true
-        };
-
-        var lblHeaderSubtitle = new Label
-        {
-            Text = "Conecte seu cofre do Obsidian ao seu repositório privado no GitHub",
-            Font = new Font("Segoe UI", 9f, FontStyle.Regular),
-            ForeColor = Color.FromArgb(161, 161, 170),
-            Location = new Point(20, 36),
-            AutoSize = true
-        };
-
-        pnlHeader.Controls.Add(lblHeaderTitle);
-        pnlHeader.Controls.Add(lblHeaderSubtitle);
+        // Header
+        var pnlHeader = SynapseTheme.CreateHeaderBar(
+            "Configuração do Synapse",
+            "Conecte seu cofre do Obsidian ao seu repositório privado no GitHub",
+            68);
         Controls.Add(pnlHeader);
 
         // Content Panel
         var pnlContent = new Panel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(24),
-            AutoScroll = true
+            Padding = new Padding(24, 20, 24, 20),
+            AutoScroll = true,
+            BackColor = SynapseTheme.Background
         };
 
-        var y = 80;
+        var y = 0;
 
         // 1. GitHub Token
-        var lblToken = new Label
-        {
-            Text = "1. GitHub Personal Access Token (PAT):",
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-            Location = new Point(24, y),
-            AutoSize = true
-        };
-        pnlContent.Controls.Add(lblToken);
-        y += 24;
+        var cardToken = SynapseTheme.CreateCard();
+        cardToken.Location = new Point(24, y);
+        cardToken.Size = new Size(568, 108);
+        cardToken.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-        _txtToken = new TextBox
-        {
-            Location = new Point(24, y),
-            Width = 430,
-            UseSystemPasswordChar = true
-        };
-        pnlContent.Controls.Add(_txtToken);
+        AddSectionLabel(cardToken, "1. GitHub Personal Access Token (PAT)");
 
-        _btnValidateToken = new Button
-        {
-            Text = "Validar",
-            Location = new Point(465, y - 1),
-            Width = 110,
-            Height = 27
-        };
+        _txtToken = new TextBox { Location = new Point(0, 26), Width = 400, UseSystemPasswordChar = true };
+        SynapseTheme.StyleInput(_txtToken);
+        cardToken.Controls.Add(_txtToken);
+
+        _btnValidateToken = new SynapseButton { Text = "Validar", Location = new Point(410, 25), Width = 110, Variant = SynapseButtonVariant.Secondary };
         _btnValidateToken.Click += async (_, _) => await ValidateTokenAsync();
-        pnlContent.Controls.Add(_btnValidateToken);
-        y += 30;
+        cardToken.Controls.Add(_btnValidateToken);
 
         _lblTokenStatus = new Label
         {
             Text = "Insira um token do GitHub com escopo 'repo'.",
-            ForeColor = Color.DimGray,
-            Location = new Point(24, y),
+            ForeColor = SynapseTheme.TextSecondary,
+            Font = SynapseTheme.FontCaption(9f),
+            Location = new Point(0, 66),
             AutoSize = true
         };
-        pnlContent.Controls.Add(_lblTokenStatus);
-        y += 36;
+        cardToken.Controls.Add(_lblTokenStatus);
+
+        pnlContent.Controls.Add(cardToken);
+        y += cardToken.Height + 16;
 
         // 2. Vault Path
-        var lblVault = new Label
-        {
-            Text = "2. Pasta do Cofre Local do Obsidian:",
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-            Location = new Point(24, y),
-            AutoSize = true
-        };
-        pnlContent.Controls.Add(lblVault);
-        y += 24;
+        var cardVault = SynapseTheme.CreateCard();
+        cardVault.Location = new Point(24, y);
+        cardVault.Size = new Size(568, 76);
+        cardVault.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-        _txtVaultPath = new TextBox
-        {
-            Location = new Point(24, y),
-            Width = 430
-        };
-        pnlContent.Controls.Add(_txtVaultPath);
+        AddSectionLabel(cardVault, "2. Pasta do Cofre Local do Obsidian");
 
-        _btnBrowseVault = new Button
-        {
-            Text = "Procurar...",
-            Location = new Point(465, y - 1),
-            Width = 110,
-            Height = 27
-        };
+        _txtVaultPath = new TextBox { Location = new Point(0, 26), Width = 400 };
+        SynapseTheme.StyleInput(_txtVaultPath);
+        cardVault.Controls.Add(_txtVaultPath);
+
+        _btnBrowseVault = new SynapseButton { Text = "Procurar...", Location = new Point(410, 25), Width = 110, Variant = SynapseButtonVariant.Secondary };
         _btnBrowseVault.Click += (_, _) => BrowseVaultFolder();
-        pnlContent.Controls.Add(_btnBrowseVault);
-        y += 40;
+        cardVault.Controls.Add(_btnBrowseVault);
+
+        pnlContent.Controls.Add(cardVault);
+        y += cardVault.Height + 16;
 
         // 3. GitHub Repo Config
-        var lblRepoConfig = new Label
-        {
-            Text = "3. Repositório Privado no GitHub:",
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-            Location = new Point(24, y),
-            AutoSize = true
-        };
-        pnlContent.Controls.Add(lblRepoConfig);
-        y += 24;
+        var cardRepo = SynapseTheme.CreateCard();
+        cardRepo.Location = new Point(24, y);
+        cardRepo.Size = new Size(568, 128);
+        cardRepo.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-        var lblOwner = new Label
-        {
-            Text = "Usuário / Organização:",
-            Location = new Point(24, y),
-            AutoSize = true
-        };
-        pnlContent.Controls.Add(lblOwner);
+        AddSectionLabel(cardRepo, "3. Repositório Privado no GitHub");
 
-        _txtOwner = new TextBox
-        {
-            Location = new Point(24, y + 20),
-            Width = 260
-        };
-        pnlContent.Controls.Add(_txtOwner);
+        var lblOwner = new Label { Text = "Usuário / Organização", ForeColor = SynapseTheme.TextSecondary, Font = SynapseTheme.FontCaption(8.5f), Location = new Point(0, 26), AutoSize = true };
+        cardRepo.Controls.Add(lblOwner);
 
-        var lblRepoName = new Label
-        {
-            Text = "Nome do Repositório:",
-            Location = new Point(310, y),
-            AutoSize = true
-        };
-        pnlContent.Controls.Add(lblRepoName);
+        _txtOwner = new TextBox { Location = new Point(0, 44), Width = 254 };
+        SynapseTheme.StyleInput(_txtOwner);
+        cardRepo.Controls.Add(_txtOwner);
 
-        _txtRepo = new TextBox
-        {
-            Location = new Point(310, y + 20),
-            Width = 265,
-            Text = "Synapse-Vault"
-        };
-        pnlContent.Controls.Add(_txtRepo);
-        y += 54;
+        var lblRepoName = new Label { Text = "Nome do Repositório", ForeColor = SynapseTheme.TextSecondary, Font = SynapseTheme.FontCaption(8.5f), Location = new Point(266, 26), AutoSize = true };
+        cardRepo.Controls.Add(lblRepoName);
+
+        _txtRepo = new TextBox { Location = new Point(266, 44), Width = 254, Text = "Synapse-Vault" };
+        SynapseTheme.StyleInput(_txtRepo);
+        cardRepo.Controls.Add(_txtRepo);
 
         _chkAutoCreate = new CheckBox
         {
             Text = "Criar repositório privado automaticamente se não existir",
             Checked = true,
-            Location = new Point(24, y),
+            ForeColor = SynapseTheme.TextPrimary,
+            Font = SynapseTheme.FontBody(9f),
+            Location = new Point(0, 84),
             AutoSize = true
         };
-        pnlContent.Controls.Add(_chkAutoCreate);
-        y += 34;
+        cardRepo.Controls.Add(_chkAutoCreate);
+
+        pnlContent.Controls.Add(cardRepo);
+        y += cardRepo.Height + 16;
 
         // 4. Google Gemini API Key (Opcional)
-        var lblGemini = new Label
-        {
-            Text = "4. Google Gemini API Key (Opcional - para IA e Segundo Cérebro):",
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-            Location = new Point(24, y),
-            AutoSize = true
-        };
-        pnlContent.Controls.Add(lblGemini);
-        y += 22;
+        var cardGemini = SynapseTheme.CreateCard();
+        cardGemini.Location = new Point(24, y);
+        cardGemini.Size = new Size(568, 96);
+        cardGemini.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-        _txtGeminiApiKey = new TextBox
-        {
-            Location = new Point(24, y),
-            Width = 550,
-            UseSystemPasswordChar = true
-        };
-        pnlContent.Controls.Add(_txtGeminiApiKey);
-        y += 24;
+        AddSectionLabel(cardGemini, "4. Google Gemini API Key (opcional — IA e Segundo Cérebro)");
+
+        _txtGeminiApiKey = new TextBox { Location = new Point(0, 26), Width = 536, UseSystemPasswordChar = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+        SynapseTheme.StyleInput(_txtGeminiApiKey);
+        cardGemini.Controls.Add(_txtGeminiApiKey);
 
         var lblGeminiHelp = new Label
         {
             Text = "Obtenha uma chave gratuita em https://aistudio.google.com/",
-            ForeColor = Color.DimGray,
-            Font = new Font("Segoe UI", 8.5f, FontStyle.Italic),
-            Location = new Point(24, y),
+            ForeColor = SynapseTheme.TextSecondary,
+            Font = SynapseTheme.FontCaptionItalic(8.5f),
+            Location = new Point(0, 58),
             AutoSize = true
         };
-        pnlContent.Controls.Add(lblGeminiHelp);
-        y += 34;
+        cardGemini.Controls.Add(lblGeminiHelp);
 
-        // Footer buttons
-        _btnSave = new Button
-        {
-            Text = "Salvar e Iniciar",
-            Location = new Point(300, y),
-            Width = 160,
-            Height = 34,
-            BackColor = Color.FromArgb(16, 185, 129),
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
-        };
-        _btnSave.Click += async (_, _) => await SaveAndFinishAsync();
-        pnlContent.Controls.Add(_btnSave);
-
-        _btnCancel = new Button
-        {
-            Text = "Cancelar",
-            Location = new Point(470, y),
-            Width = 105,
-            Height = 34
-        };
-        _btnCancel.Click += (_, _) => DialogResult = DialogResult.Cancel;
-        pnlContent.Controls.Add(_btnCancel);
+        pnlContent.Controls.Add(cardGemini);
 
         Controls.Add(pnlContent);
 
+        // Footer
+        var pnlFooter = new Panel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 64,
+            BackColor = SynapseTheme.SurfaceAlt
+        };
+
+        _btnCancel = new SynapseButton { Text = "Cancelar", Width = 105, Height = 34, Variant = SynapseButtonVariant.Ghost };
+        _btnCancel.Location = new Point(pnlFooter.Width - _btnCancel.Width - 24, 15);
+        _btnCancel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _btnCancel.Click += (_, _) => DialogResult = DialogResult.Cancel;
+        pnlFooter.Controls.Add(_btnCancel);
+
+        _btnSave = new SynapseButton { Text = "Salvar e Iniciar", Width = 160, Height = 34, Variant = SynapseButtonVariant.Primary };
+        _btnSave.Location = new Point(_btnCancel.Left - _btnSave.Width - 12, 15);
+        _btnSave.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _btnSave.Click += async (_, _) => await SaveAndFinishAsync();
+        pnlFooter.Controls.Add(_btnSave);
+
+        Controls.Add(pnlFooter);
+
         // Carrega configurações existentes se houver
         _ = LoadExistingConfigAsync();
+    }
+
+    private static void AddSectionLabel(Control card, string text)
+    {
+        card.Controls.Add(new Label
+        {
+            Text = text,
+            Font = SynapseTheme.FontBodyBold(9.5f),
+            ForeColor = SynapseTheme.TextPrimary,
+            Location = new Point(0, 0),
+            AutoSize = true
+        });
     }
 
     private async Task LoadExistingConfigAsync()
@@ -305,14 +248,14 @@ public sealed class OnboardingForm : Form
         if (string.IsNullOrWhiteSpace(token))
         {
             _lblTokenStatus.Text = "Por favor, insira o token do GitHub.";
-            _lblTokenStatus.ForeColor = Color.Red;
+            _lblTokenStatus.ForeColor = SynapseTheme.Error;
             _isTokenValid = false;
             return false;
         }
 
         _btnValidateToken.Enabled = false;
         _lblTokenStatus.Text = "Validando token com a API do GitHub...";
-        _lblTokenStatus.ForeColor = Color.DimGray;
+        _lblTokenStatus.ForeColor = SynapseTheme.TextSecondary;
 
         try
         {
@@ -323,7 +266,7 @@ public sealed class OnboardingForm : Form
             if (valid)
             {
                 _lblTokenStatus.Text = "✓ Token válido e autenticado com sucesso!";
-                _lblTokenStatus.ForeColor = Color.FromArgb(16, 185, 129);
+                _lblTokenStatus.ForeColor = SynapseTheme.Success;
                 _isTokenValid = true;
 
                 // Tenta preencher o Owner se estiver vazio
@@ -341,7 +284,7 @@ public sealed class OnboardingForm : Form
             else
             {
                 _lblTokenStatus.Text = "Token inválido ou não autorizado.";
-                _lblTokenStatus.ForeColor = Color.Red;
+                _lblTokenStatus.ForeColor = SynapseTheme.Error;
                 _isTokenValid = false;
                 return false;
             }
@@ -349,7 +292,7 @@ public sealed class OnboardingForm : Form
         catch (Exception ex)
         {
             _lblTokenStatus.Text = $"Erro ao validar: {ex.Message}";
-            _lblTokenStatus.ForeColor = Color.Red;
+            _lblTokenStatus.ForeColor = SynapseTheme.Error;
             _isTokenValid = false;
             return false;
         }

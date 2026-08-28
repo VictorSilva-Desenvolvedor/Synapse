@@ -3,6 +3,7 @@ using Synapse.Brain.Models;
 using Synapse.Brain.Providers;
 using Synapse.Brain.Services;
 using Synapse.Sync.Config;
+using Synapse.Tray.UI;
 
 namespace Synapse.Tray.Chat;
 
@@ -13,8 +14,8 @@ public sealed class ChatVaultForm : Form
 {
     private readonly RichTextBox _txtHistory;
     private readonly TextBox _txtInput;
-    private readonly Button _btnSend;
-    private readonly Button _btnSaveNote;
+    private readonly SynapseButton _btnSend;
+    private readonly SynapseButton _btnSaveNote;
     private readonly ListView _lstSources;
     private readonly Label _lblStatus;
     private readonly SynapseConfigManager _configManager;
@@ -29,36 +30,13 @@ public sealed class ChatVaultForm : Form
         Text = "Synapse — Conversar com o Segundo Cérebro";
         Size = new Size(880, 680);
         StartPosition = FormStartPosition.CenterScreen;
-        Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+        SynapseTheme.ApplyFormChrome(this);
 
         // Header Panel
-        var pnlHeader = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = 60,
-            BackColor = Color.FromArgb(24, 24, 27)
-        };
-
-        var lblTitle = new Label
-        {
-            Text = "💬 Conversar com o Segundo Cérebro (RAG)",
-            Font = new Font("Segoe UI", 12f, FontStyle.Bold),
-            ForeColor = Color.White,
-            Location = new Point(20, 10),
-            AutoSize = true
-        };
-
-        var lblSubtitle = new Label
-        {
-            Text = "Faça perguntas em linguagem natural sobre qualquer assunto anotado no seu cofre do Obsidian.",
-            Font = new Font("Segoe UI", 9f, FontStyle.Regular),
-            ForeColor = Color.FromArgb(161, 161, 170),
-            Location = new Point(20, 34),
-            AutoSize = true
-        };
-
-        pnlHeader.Controls.Add(lblTitle);
-        pnlHeader.Controls.Add(lblSubtitle);
+        var pnlHeader = SynapseTheme.CreateHeaderBar(
+            "💬 Conversar com o Segundo Cérebro (RAG)",
+            "Faça perguntas em linguagem natural sobre qualquer assunto anotado no seu cofre do Obsidian.",
+            64);
         Controls.Add(pnlHeader);
 
         // Split Container (Top: Chat History, Bottom: Sources)
@@ -66,7 +44,8 @@ public sealed class ChatVaultForm : Form
         {
             Dock = DockStyle.Fill,
             Orientation = Orientation.Horizontal,
-            SplitterDistance = 420
+            SplitterDistance = 420,
+            BackColor = SynapseTheme.Border
         };
 
         // Chat History
@@ -74,20 +53,24 @@ public sealed class ChatVaultForm : Form
         {
             Dock = DockStyle.Fill,
             ReadOnly = true,
-            BackColor = Color.FromArgb(250, 250, 250),
-            Font = new Font("Segoe UI", 10f, FontStyle.Regular),
-            Padding = new Padding(12)
+            BackColor = SynapseTheme.Background,
+            ForeColor = SynapseTheme.TextPrimary,
+            BorderStyle = BorderStyle.None,
+            Font = new Font(SynapseTheme.FontFamily, 10f, FontStyle.Regular),
+            Padding = new Padding(16)
         };
         splitContainer.Panel1.Controls.Add(_txtHistory);
+        splitContainer.Panel1.BackColor = SynapseTheme.Background;
 
         // Sources Panel
-        var pnlSources = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8) };
+        var pnlSources = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8), BackColor = SynapseTheme.SurfaceAlt };
         var lblSourcesHeader = new Label
         {
-            Text = "Notas de Referência Citadas (Duplo clique para abrir):",
-            Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+            Text = "Notas de Referência Citadas (duplo clique para abrir)",
+            Font = SynapseTheme.FontBodyBold(9f),
+            ForeColor = SynapseTheme.TextSecondary,
             Dock = DockStyle.Top,
-            Height = 22
+            Height = 24
         };
 
         _lstSources = new ListView
@@ -95,8 +78,9 @@ public sealed class ChatVaultForm : Form
             Dock = DockStyle.Fill,
             View = View.Details,
             FullRowSelect = true,
-            GridLines = true
+            GridLines = false
         };
+        SynapseTheme.StyleListView(_lstSources);
         _lstSources.Columns.Add("Nota Citada", 220);
         _lstSources.Columns.Add("Similaridade", 90);
         _lstSources.Columns.Add("Trecho", 520);
@@ -105,6 +89,7 @@ public sealed class ChatVaultForm : Form
         pnlSources.Controls.Add(_lstSources);
         pnlSources.Controls.Add(lblSourcesHeader);
         splitContainer.Panel2.Controls.Add(pnlSources);
+        splitContainer.Panel2.BackColor = SynapseTheme.SurfaceAlt;
 
         Controls.Add(splitContainer);
 
@@ -112,8 +97,8 @@ public sealed class ChatVaultForm : Form
         var pnlFooter = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 70,
-            BackColor = Color.FromArgb(244, 244, 245),
+            Height = 76,
+            BackColor = SynapseTheme.SurfaceAlt,
             Padding = new Padding(16, 12, 16, 12)
         };
 
@@ -121,8 +106,9 @@ public sealed class ChatVaultForm : Form
         {
             Location = new Point(16, 14),
             Width = 470,
-            Font = new Font("Segoe UI", 10.5f, FontStyle.Regular)
+            Font = new Font(SynapseTheme.FontFamily, 10.5f, FontStyle.Regular)
         };
+        SynapseTheme.StyleInput(_txtInput);
         _txtInput.KeyDown += async (_, e) =>
         {
             if (e.KeyCode == Keys.Enter)
@@ -132,29 +118,23 @@ public sealed class ChatVaultForm : Form
             }
         };
 
-        _btnSend = new Button
+        _btnSend = new SynapseButton
         {
             Text = "Perguntar ao Cofre",
             Location = new Point(496, 12),
             Width = 160,
-            Height = 35,
-            BackColor = Color.FromArgb(59, 130, 246),
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+            Height = 36,
+            Variant = SynapseButtonVariant.Secondary
         };
         _btnSend.Click += async (_, _) => await SendQuestionAsync();
 
-        _btnSaveNote = new Button
+        _btnSaveNote = new SynapseButton
         {
             Text = "💾 Salvar como Nota",
             Location = new Point(666, 12),
             Width = 180,
-            Height = 35,
-            BackColor = Color.FromArgb(16, 185, 129),
-            ForeColor = Color.White,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            Height = 36,
+            Variant = SynapseButtonVariant.Primary,
             Enabled = false
         };
         _btnSaveNote.Click += async (_, _) => await SaveAnswerAsNoteAsync();
@@ -162,10 +142,10 @@ public sealed class ChatVaultForm : Form
         _lblStatus = new Label
         {
             Text = "Inicializando índice semântico...",
-            ForeColor = Color.DimGray,
-            Location = new Point(16, 48),
+            ForeColor = SynapseTheme.TextSecondary,
+            Location = new Point(16, 50),
             AutoSize = true,
-            Font = new Font("Segoe UI", 8.5f, FontStyle.Regular)
+            Font = SynapseTheme.FontCaption()
         };
 
         pnlFooter.Controls.Add(_txtInput);
@@ -269,12 +249,12 @@ public sealed class ChatVaultForm : Form
     private void AppendMessage(string sender, string message)
     {
         _txtHistory.SelectionStart = _txtHistory.TextLength;
-        _txtHistory.SelectionFont = new Font("Segoe UI", 10f, FontStyle.Bold);
-        _txtHistory.SelectionColor = sender == "Você" ? Color.FromArgb(37, 99, 235) : Color.FromArgb(16, 185, 129);
+        _txtHistory.SelectionFont = SynapseTheme.FontBodyBold(10f);
+        _txtHistory.SelectionColor = sender == "Você" ? SynapseTheme.AccentSecondary : SynapseTheme.AccentPrimary;
         _txtHistory.AppendText($"{sender} ({DateTime.Now:HH:mm}):\n");
 
-        _txtHistory.SelectionFont = new Font("Segoe UI", 10f, FontStyle.Regular);
-        _txtHistory.SelectionColor = Color.FromArgb(39, 39, 42);
+        _txtHistory.SelectionFont = SynapseTheme.FontBody(10f);
+        _txtHistory.SelectionColor = SynapseTheme.TextPrimary;
         _txtHistory.AppendText($"{message}\n\n");
 
         _txtHistory.ScrollToCaret();

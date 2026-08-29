@@ -1,48 +1,42 @@
 <#
 .SYNOPSIS
-    Script de desinstalacao do Synapse (para o servico, remove o registro e limpa a bandeja).
+    Script de desinstalacao do Synapse: encerra os processos e remove o autostart do login.
 #>
 
 [CmdletBinding()]
-param (
-    [string]$ServiceName = "Synapse"
-)
+param ()
 
 $ErrorActionPreference = "Stop"
 
-# Verifica se esta executando como Administrador
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    Write-Error "Este script precisa ser executado como Administrador para remover o servico do Windows."
-    exit 1
-}
-
 Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host "   Synapse - Desinstalacao do Servico" -ForegroundColor Cyan
+Write-Host "   Synapse - Desinstalacao" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor Cyan
 
-# 1. Encerra a bandeja se estiver rodando
-$trayProcess = Get-Process -Name "Synapse.Tray" -ErrorAction SilentlyContinue
-if ($trayProcess) {
-    Write-Host "Encerrando processo da bandeja..." -ForegroundColor Yellow
-    Stop-Process -Name "Synapse.Tray" -Force -ErrorAction SilentlyContinue
-}
+# 1. Encerra os processos se estiverem rodando
+Write-Host "Encerrando processos do Synapse..." -ForegroundColor Yellow
+Get-Process -Name "Synapse.Host", "Synapse.Tray" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 # 2. Remove da inicializacao do usuario
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-if (Get-ItemProperty -Path $runKey -Name "SynapseTray" -ErrorAction SilentlyContinue) {
-    Write-Host "Removendo Synapse.Tray da inicializacao do Windows..." -ForegroundColor Yellow
-    Remove-ItemProperty -Path $runKey -Name "SynapseTray" -ErrorAction SilentlyContinue
+foreach ($name in @("SynapseHost", "SynapseTray")) {
+    if (Get-ItemProperty -Path $runKey -Name $name -ErrorAction SilentlyContinue) {
+        Write-Host "Removendo $name da inicializacao do Windows..." -ForegroundColor Yellow
+        Remove-ItemProperty -Path $runKey -Name $name -ErrorAction SilentlyContinue
+    }
 }
 
-# 3. Para e remove o Windows Service
-$existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+# 3. Remove um Windows Service "Synapse" de versoes antigas, se existir (best-effort,
+#    precisa de Administrador - versoes atuais nao criam mais servico nenhum)
+$existingService = Get-Service -Name "Synapse" -ErrorAction SilentlyContinue
 if ($existingService) {
-    Write-Host "Parando servico $ServiceName..." -ForegroundColor Yellow
-    & sc.exe stop $ServiceName | Out-Null
-    Start-Sleep -Seconds 2
-    Write-Host "Excluindo servico $ServiceName..." -ForegroundColor Yellow
-    & sc.exe delete $ServiceName | Out-Null
+    Write-Host "Encontrado servico 'Synapse' de uma instalacao antiga. Tentando remover..." -ForegroundColor Yellow
+    try {
+        & sc.exe stop Synapse | Out-Null
+        Start-Sleep -Seconds 2
+        & sc.exe delete Synapse | Out-Null
+    } catch {
+        Write-Warning "Nao foi possivel remover o servico antigo (rode como Administrador pra remover manualmente com 'sc.exe delete Synapse')."
+    }
 }
 
 Write-Host "=========================================" -ForegroundColor Green

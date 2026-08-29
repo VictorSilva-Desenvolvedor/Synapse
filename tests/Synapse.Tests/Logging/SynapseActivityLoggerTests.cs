@@ -101,10 +101,10 @@ public sealed class SynapseActivityLoggerTests : IDisposable
                 "Teste de Timeout",
                 async ct =>
                 {
-                    await Task.Delay(500, ct);
+                    await Task.Delay(10000, ct);
                     return "ok";
                 },
-                timeoutMs: 50); // Timeout forçado de 50ms para teste
+                timeoutMs: 100); // Timeout forçado de 100ms para teste (margem grande p/ evitar flakiness em CI sob carga)
         });
 
         var jsonlFile = Path.Combine(_tempLocalLogsDir, "synapse_activity.jsonl");

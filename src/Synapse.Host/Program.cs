@@ -1,4 +1,5 @@
 using Serilog;
+using Serilog.Settings.Configuration;
 using Synapse.Conflict;
 using Synapse.Core.Ports;
 using Synapse.Data;
@@ -19,8 +20,17 @@ builder.Services.AddWindowsService(options =>
 });
 
 // Configuração do Serilog
+// ConfigurationReaderOptions com assemblies explícitos é necessário porque o Host é
+// publicado como single-file (PublishSingleFile=true) — nesse modo o AssemblyFinder
+// do Serilog.Settings.Configuration não consegue localizar os assemblies dos sinks
+// (Console/File) via reflection normal, e a leitura da seção "Serilog" do
+// appsettings.json falha com "No Serilog:Using configuration section is defined".
+var serilogReaderOptions = new ConfigurationReaderOptions(
+    typeof(Serilog.ConsoleLoggerConfigurationExtensions).Assembly,
+    typeof(Serilog.FileLoggerConfigurationExtensions).Assembly);
+
 Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(builder.Configuration)
+    .ReadFrom.Configuration(builder.Configuration, serilogReaderOptions)
     .Enrich.FromLogContext()
     .Enrich.WithMachineName()
     .CreateLogger();

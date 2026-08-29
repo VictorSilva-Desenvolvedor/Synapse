@@ -8,4 +8,6 @@ namespace Synapse.Brain.Ports;
 public interface IVaultBrainQuery
 {
     Task<RagAnswer> AskVaultAsync(string question, string vaultRootPath, CancellationToken ct = default);
+
+    Task<ChatTurnOutcome> ProcessChatTurnAsync(string userMessage, string vaultRootPath, CancellationToken ct = default);
 }

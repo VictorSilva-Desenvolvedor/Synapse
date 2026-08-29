@@ -499,31 +499,44 @@ public sealed class RemoteCommandExecutor
 
         try
         {
-            _logger?.LogInformation("Executando consulta RAG no cofre para a pergunta: \"{Question}\"", question);
+            _logger?.LogInformation("Executando processamento de chat/captura no cofre para: \"{Question}\"", question);
             var sw = Stopwatch.StartNew();
-            var answer = await _brainQuery.AskVaultAsync(question.Trim(), config.VaultPath, ct);
+            var outcome = await _brainQuery.ProcessChatTurnAsync(question.Trim(), config.VaultPath, ct);
             sw.Stop();
 
-            var answerMessage = answer.Answer;
-            if (answer.Sources != null && answer.Sources.Count > 0)
+            var returnMessage = outcome.ReplyMessage;
+
+            if (!string.IsNullOrWhiteSpace(outcome.SavedNotePath))
             {
-                var sourcesFormatted = string.Join(", ", answer.Sources.Select(s => string.IsNullOrWhiteSpace(s.Title) ? $"[[{Path.GetFileNameWithoutExtension(s.RelativePath)}]]" : $"[[{s.Title}]]"));
-                answerMessage += $"\n\nFontes: {sourcesFormatted}";
+                var noteTitle = Path.GetFileNameWithoutExtension(outcome.SavedNotePath);
+                var savedNoteBadge = $"💾 Salvo em: [[{noteTitle}]]";
+                returnMessage = string.IsNullOrWhiteSpace(returnMessage)
+                    ? savedNoteBadge
+                    : $"{returnMessage}\n\n{savedNoteBadge}";
+            }
+
+            if (outcome.Sources != null && outcome.Sources.Count > 0)
+            {
+                var sourcesFormatted = string.Join(", ", outcome.Sources.Select(s => string.IsNullOrWhiteSpace(s.Title) ? $"[[{Path.GetFileNameWithoutExtension(s.RelativePath)}]]" : $"[[{s.Title}]]"));
+                returnMessage = string.IsNullOrWhiteSpace(returnMessage)
+                    ? $"Fontes: {sourcesFormatted}"
+                    : $"{returnMessage}\n\nFontes: {sourcesFormatted}";
             }
 
             SynapseActivityLogger.Instance.SetVaultPath(config.VaultPath);
             _ = SynapseActivityLogger.Instance.LogChatAsync(
                 question.Trim(),
-                answerMessage,
+                returnMessage,
                 sw.ElapsedMilliseconds,
                 "Success",
-                answer.Sources?.Select(s => s.Title).ToList());
+                outcome.Sources?.Select(s => s.Title).ToList(),
+                outcome.SavedNotePath);
 
             return new RemoteCommandResult(
                 command.Id,
                 DateTimeOffset.UtcNow,
                 RemoteCommandStatus.Success,
-                answerMessage);
+                returnMessage);
         }
         catch (Exception ex)
         {

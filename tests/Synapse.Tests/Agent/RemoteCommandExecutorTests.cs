@@ -4,6 +4,7 @@ using Synapse.Agent;
 using Synapse.Agent.Models;
 using Synapse.Brain.Models;
 using Synapse.Brain.Ports;
+using Synapse.Brain.Services;
 using Synapse.Sync.Config;
 
 namespace Synapse.Tests.Agent;
@@ -562,7 +563,7 @@ public class RemoteCommandExecutorTests : IDisposable
 
         result.Status.ShouldBe(RemoteCommandStatus.Rejected);
         result.Message.ShouldContain("desativado");
-        await mockBrain.DidNotReceiveWithAnyArgs().AskVaultAsync(default!, default!, default);
+        await mockBrain.DidNotReceiveWithAnyArgs().ProcessChatTurnAsync(default!, default!, default);
     }
 
     [Fact]
@@ -588,7 +589,7 @@ public class RemoteCommandExecutorTests : IDisposable
 
         result.Status.ShouldBe(RemoteCommandStatus.Rejected);
         result.Message.ShouldContain("question");
-        await mockBrain.DidNotReceiveWithAnyArgs().AskVaultAsync(default!, default!, default);
+        await mockBrain.DidNotReceiveWithAnyArgs().ProcessChatTurnAsync(default!, default!, default);
     }
 
     [Fact]
@@ -614,7 +615,7 @@ public class RemoteCommandExecutorTests : IDisposable
 
         result.Status.ShouldBe(RemoteCommandStatus.Rejected);
         result.Message.ShouldContain("Gemini");
-        await mockBrain.DidNotReceiveWithAnyArgs().AskVaultAsync(default!, default!, default);
+        await mockBrain.DidNotReceiveWithAnyArgs().ProcessChatTurnAsync(default!, default!, default);
     }
 
     [Fact]
@@ -664,7 +665,7 @@ public class RemoteCommandExecutorTests : IDisposable
 
         result.Status.ShouldBe(RemoteCommandStatus.Rejected);
         result.Message.ShouldContain("Cofre local não configurado ou diretório não encontrado");
-        await mockBrain.DidNotReceiveWithAnyArgs().AskVaultAsync(default!, default!, default);
+        await mockBrain.DidNotReceiveWithAnyArgs().ProcessChatTurnAsync(default!, default!, default);
     }
 
     [Fact]
@@ -678,10 +679,10 @@ public class RemoteCommandExecutorTests : IDisposable
         };
 
         var mockBrain = Substitute.For<IVaultBrainQuery>();
-        mockBrain.AskVaultAsync("Como funciona a arquitetura?", _tempVaultDir, Arg.Any<CancellationToken>())
-            .Returns(new RagAnswer(
-                "Como funciona a arquitetura?",
+        mockBrain.ProcessChatTurnAsync("Como funciona a arquitetura?", _tempVaultDir, Arg.Any<CancellationToken>())
+            .Returns(new ChatTurnOutcome(
                 "O Synapse utiliza Clean Architecture com C# .NET 8 e protocolo GitHub Relay.",
+                null,
                 [
                     new SemanticSearchResult("Projetos/Arquitetura.md", "Arquitetura", "", 0.9f),
                     new SemanticSearchResult("Brain/Decisoes.md", "Decisoes", "", 0.85f)
@@ -713,10 +714,10 @@ public class RemoteCommandExecutorTests : IDisposable
         };
 
         var mockBrain = Substitute.For<IVaultBrainQuery>();
-        mockBrain.AskVaultAsync("Existe alguma anotação sobre Rust?", _tempVaultDir, Arg.Any<CancellationToken>())
-            .Returns(new RagAnswer(
-                "Existe alguma anotação sobre Rust?",
+        mockBrain.ProcessChatTurnAsync("Existe alguma anotação sobre Rust?", _tempVaultDir, Arg.Any<CancellationToken>())
+            .Returns(new ChatTurnOutcome(
                 "Não encontrei notas relevantes no seu cofre para responder a essa pergunta.",
+                null,
                 []));
 
         var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
@@ -732,6 +733,132 @@ public class RemoteCommandExecutorTests : IDisposable
         result.Status.ShouldBe(RemoteCommandStatus.Success);
         result.Message.ShouldBe("Não encontrei notas relevantes no seu cofre para responder a essa pergunta.");
         result.Message.ShouldNotContain("Fontes:");
+        result.Message.ShouldNotContain("Salvo em:");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WhenCaptureTurn_ShouldReturnMessageWithSavedNoteWikilink()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            GeminiApiKey = "fake-key"
+        };
+
+        var mockBrain = Substitute.For<IVaultBrainQuery>();
+        mockBrain.ProcessChatTurnAsync("lembrete: comprar café", _tempVaultDir, Arg.Any<CancellationToken>())
+            .Returns(new ChatTurnOutcome(
+                "Anotado! Capturei seu lembrete no cofre.",
+                "Brain/Tarefas/Comprar Café.md",
+                []));
+
+        var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string> { ["question"] = "lembrete: comprar café" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Success);
+        result.Message.ShouldContain("Anotado! Capturei seu lembrete no cofre.");
+        result.Message.ShouldContain("💾 Salvo em: [[Comprar Café]]");
+        result.Message.ShouldNotContain("Fontes:");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WhenHybridTurn_ShouldReturnMessageWithSavedNoteAndSources()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            GeminiApiKey = "fake-key"
+        };
+
+        var mockBrain = Substitute.For<IVaultBrainQuery>();
+        mockBrain.ProcessChatTurnAsync("conectar ideia X com Arquitetura", _tempVaultDir, Arg.Any<CancellationToken>())
+            .Returns(new ChatTurnOutcome(
+                "Nota criada e conectada com sucesso.",
+                "Brain/Conceitos/Ideia X.md",
+                [new SemanticSearchResult("Projetos/Arquitetura.md", "Arquitetura", "", 0.88f)]));
+
+        var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string> { ["question"] = "conectar ideia X com Arquitetura" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Success);
+        result.Message.ShouldContain("Nota criada e conectada com sucesso.");
+        result.Message.ShouldContain("💾 Salvo em: [[Ideia X]]");
+        result.Message.ShouldContain("Fontes: [[Arquitetura]]");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AskVault_WithRealVaultRagEngine_WhenCapturePrompt_ShouldCreateNoteInVaultAndConfirm()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            GeminiApiKey = "fake-key"
+        };
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 0.5f, 0.5f, 0.5f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        mockAi.ProcessChatTurnAsync(
+            Arg.Any<string>(),
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Any<IReadOnlyList<string>>(),
+            Arg.Any<IReadOnlyList<SemanticSearchResult>>(),
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new ChatTurnResult
+            {
+                ShouldCapture = true,
+                Title = "Reunião Amanhã às 10h",
+                Category = "Tarefas",
+                Tags = ["reuniao", "trabalho"],
+                BodyMarkdown = "Alinhar pauta da sprint na reunião das 10h.",
+                KeyPoints = ["Reunião 10h", "Pauta da sprint"],
+                SuggestedConnections = [],
+                ShouldAnswer = false,
+                ReplyMessage = "Lembrete salvo no cofre com sucesso!"
+            }));
+
+        var brainConfig = new BrainConfig { DefaultFolder = "Brain", AutoCategorizeFolders = true };
+        var realRagEngine = new VaultRagEngine(mockEmbedding, mockAi, brainConfig);
+
+        var executor = new RemoteCommandExecutor(config, brainQuery: realRagEngine);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.AskVault,
+            Payload: new Dictionary<string, string> { ["question"] = "lembrete: reuniao amanha as 10h" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        result.Status.ShouldBe(RemoteCommandStatus.Success);
+        result.Message.ShouldContain("Lembrete salvo no cofre com sucesso!");
+        result.Message.ShouldContain("💾 Salvo em: [[Reunião Amanhã às 10h]]");
+
+        var createdFiles = Directory.GetFiles(_tempVaultDir, "*.md", SearchOption.AllDirectories);
+        createdFiles.Length.ShouldBe(1);
+        var fileContent = await File.ReadAllTextAsync(createdFiles[0]);
+        fileContent.ShouldContain("titulo: \"Reunião Amanhã às 10h\"");
+        fileContent.ShouldContain("categoria: \"Tarefas\"");
+        fileContent.ShouldContain("Alinhar pauta da sprint na reunião das 10h.");
     }
 
     [Fact]
@@ -745,8 +872,8 @@ public class RemoteCommandExecutorTests : IDisposable
         };
 
         var mockBrain = Substitute.For<IVaultBrainQuery>();
-        mockBrain.AskVaultAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns<Task<RagAnswer>>(_ => Task.FromException<RagAnswer>(new HttpRequestException("Erro de conexão com a API do Gemini.")));
+        mockBrain.ProcessChatTurnAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<Task<ChatTurnOutcome>>(_ => Task.FromException<ChatTurnOutcome>(new HttpRequestException("Erro de conexão com a API do Gemini.")));
 
         var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
         var command = new RemoteCommand(

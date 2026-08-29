@@ -21,38 +21,37 @@ public sealed class DiagnosticsForm : Form
     public DiagnosticsForm(SynapseConfigManager? configManager = null)
     {
         _configManager = configManager ?? new SynapseConfigManager();
-
-        Text = "Synapse — Diagnóstico e Conflitos";
-        Size = new Size(860, 600);
+        Text = "Synapse — Diagnóstico e Conflitos [Pixel Edition]";
+        Size = new Size(920, 640);
         StartPosition = FormStartPosition.CenterScreen;
         SynapseTheme.ApplyFormChrome(this);
 
         // Header Panel
         var pnlHeader = SynapseTheme.CreateHeaderBar(
-            "Diagnóstico & Histórico do Synapse",
+            "► DIAGNÓSTICO & HISTÓRICO DO SYNAPSE",
             "Inspeção de conflitos preservados e visualização de logs em tempo real",
-            60);
-        Controls.Add(pnlHeader);
+            70);
 
         // Tab Control
         _tabControl = new TabControl
         {
             Dock = DockStyle.Fill,
-            BackColor = SynapseTheme.Surface
+            BackColor = SynapseTheme.Surface,
+            Font = SynapseTheme.FontHeadline(8f)
         };
 
         // Tab 1: Conflitos
-        var tabConflicts = new TabPage("Conflitos Preservados (_conflitos/)");
+        var tabConflicts = new TabPage("► CONFLITOS PRESERVADOS");
         tabConflicts.Padding = new Padding(12);
         tabConflicts.BackColor = SynapseTheme.Background;
 
         var lblConflictInfo = new Label
         {
-            Text = "Política de Zero Perda de Dados (RNF-2): conflitos não resolvidos automaticamente são mantidos com segurança na pasta _conflitos/.",
-            ForeColor = SynapseTheme.TextSecondary,
-            Font = SynapseTheme.FontCaption(9f),
+            Text = "● Zero Perda de Dados (RNF-2): conflitos são mantidos na pasta _conflitos/.",
+            ForeColor = SynapseTheme.Warning,
+            Font = SynapseTheme.FontCaption(8f),
             Dock = DockStyle.Top,
-            Height = 28
+            Height = 26
         };
         tabConflicts.Controls.Add(lblConflictInfo);
 
@@ -66,24 +65,25 @@ public sealed class DiagnosticsForm : Form
         SynapseTheme.StyleListView(_lstConflicts);
         _lstConflicts.Columns.Add("Arquivo", 240);
         _lstConflicts.Columns.Add("Caminho Relativo", 320);
-        _lstConflicts.Columns.Add("Modificado em", 140);
-        _lstConflicts.Columns.Add("Tamanho", 90);
+        _lstConflicts.Columns.Add("Modificado em", 160);
+        _lstConflicts.Columns.Add("Tamanho", 100);
+        SynapseTheme.FillLastColumn(_lstConflicts, 100);
         tabConflicts.Controls.Add(_lstConflicts);
 
         var pnlConflictActions = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 45,
-            Padding = new Padding(0, 8, 0, 0),
+            Height = 50,
+            Padding = new Padding(0, 10, 0, 0),
             BackColor = SynapseTheme.Background
         };
 
         var btnResolveDiff = new SynapseButton
         {
-            Text = "Resolver (3-Way Diff)...",
-            Location = new Point(0, 6),
-            Width = 170,
-            Height = 32,
+            Text = "► Resolver (3-Way Diff)...",
+            Location = new Point(0, 8),
+            Width = 220,
+            Height = 36,
             Variant = SynapseButtonVariant.Primary
         };
         btnResolveDiff.Click += (_, _) => OpenThreeWayDiffForSelectedConflict();
@@ -91,19 +91,19 @@ public sealed class DiagnosticsForm : Form
         var btnOpenConflictFile = new SynapseButton
         {
             Text = "Abrir Arquivo",
-            Location = new Point(180, 6),
-            Width = 110,
-            Height = 32,
+            Location = new Point(230, 8),
+            Width = 140,
+            Height = 36,
             Variant = SynapseButtonVariant.Secondary
         };
         btnOpenConflictFile.Click += (_, _) => OpenSelectedConflict();
 
         var btnOpenConflictFolder = new SynapseButton
         {
-            Text = "Abrir Pasta _conflitos",
-            Location = new Point(300, 6),
-            Width = 160,
-            Height = 32,
+            Text = "Abrir Pasta",
+            Location = new Point(380, 8),
+            Width = 140,
+            Height = 36,
             Variant = SynapseButtonVariant.Secondary
         };
         btnOpenConflictFolder.Click += (_, _) => OpenConflictsDirectory();
@@ -111,9 +111,9 @@ public sealed class DiagnosticsForm : Form
         var btnRefreshConflicts = new SynapseButton
         {
             Text = "Atualizar Lista",
-            Location = new Point(470, 6),
-            Width = 120,
-            Height = 32,
+            Location = new Point(530, 8),
+            Width = 150,
+            Height = 36,
             Variant = SynapseButtonVariant.Ghost
         };
         btnRefreshConflicts.Click += async (_, _) => await RefreshConflictsAsync();
@@ -127,7 +127,7 @@ public sealed class DiagnosticsForm : Form
         _tabControl.TabPages.Add(tabConflicts);
 
         // Tab 2: Logs
-        var tabLogs = new TabPage("Logs do Serviço (Serilog)");
+        var tabLogs = new TabPage("► LOGS DO SERVIÇO");
         tabLogs.Padding = new Padding(12);
         tabLogs.BackColor = SynapseTheme.Background;
 
@@ -135,11 +135,10 @@ public sealed class DiagnosticsForm : Form
         {
             Dock = DockStyle.Fill,
             ReadOnly = true,
-            BackColor = SynapseTheme.SurfaceAlt,
-            ForeColor = Color.FromArgb(228, 228, 231),
-            Font = SynapseTheme.FontMono(9.5f),
-            BorderStyle = BorderStyle.FixedSingle,
-            WordWrap = false
+            BackColor = SynapseTheme.SurfaceInput,
+            ForeColor = SynapseTheme.TextPrimary,
+            Font = SynapseTheme.FontMono(8.5f),
+            BorderStyle = BorderStyle.FixedSingle
         };
         tabLogs.Controls.Add(_txtLogs);
 
@@ -203,6 +202,7 @@ public sealed class DiagnosticsForm : Form
         _tabControl.TabPages.Add(tabLogs);
 
         Controls.Add(_tabControl);
+        Controls.Add(pnlHeader);
         SynapseTheme.StyleTabControl(_tabControl);
         _autoRefreshTimer.Tick += async (_, _) =>
         {

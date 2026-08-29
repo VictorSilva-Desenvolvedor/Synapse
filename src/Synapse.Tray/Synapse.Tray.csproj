@@ -25,4 +25,8 @@
     <InternalsVisibleTo Include="Synapse.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Fonts\**" />
+  </ItemGroup>
+
 </Project>

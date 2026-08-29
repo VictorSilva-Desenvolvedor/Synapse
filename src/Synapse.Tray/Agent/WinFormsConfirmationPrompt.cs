@@ -83,7 +83,7 @@ public sealed class WinFormsConfirmationPrompt : IRemoteConfirmationPrompt
         return tcs.Task;
     }
 
-    private sealed class RemoteConfirmationForm : Form
+    internal sealed class RemoteConfirmationForm : Form
     {
         private readonly Timer _countdownTimer;
         private int _secondsRemaining;
@@ -95,9 +95,9 @@ public sealed class WinFormsConfirmationPrompt : IRemoteConfirmationPrompt
         {
             _secondsRemaining = (int)Math.Max(1, timeout.TotalSeconds);
 
-            Text = "Synapse Remote — Solicitação de Ação Sensível";
-            Width = 520;
-            Height = 340;
+            Text = "Synapse Remote — Solicitação de Ação Sensível [Pixel Edition]";
+            Width = 560;
+            Height = 390;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -107,45 +107,46 @@ public sealed class WinFormsConfirmationPrompt : IRemoteConfirmationPrompt
             SynapseTheme.ApplyFormChrome(this);
 
             var pnlHeader = SynapseTheme.CreateHeaderBar(
-                "⚠️ Autorização de Controle Remoto",
+                "► AUTORIZAÇÃO DE CONTROLE REMOTO",
                 "Uma ação sensível foi solicitada por um dispositivo remoto",
-                52);
+                65);
             Controls.Add(pnlHeader);
 
             var description = GetCommandDescription(command);
             var descTextBox = new TextBox
             {
                 Text = description,
-                Location = new Point(20, 66),
-                Width = 468,
-                Height = 150,
+                Location = new Point(20, 80),
+                Width = 505,
+                Height = 180,
                 Multiline = true,
                 ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical,
-                BorderStyle = BorderStyle.FixedSingle
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = SynapseTheme.FontMono(8.5f)
             };
             SynapseTheme.StyleInput(descTextBox);
 
-            _timerLabel = SynapseTheme.CreateStatusBadge($"⏱ {_secondsRemaining}s — negará automaticamente", SynapseTheme.Warning);
-            _timerLabel.Location = new Point(20, 226);
+            _timerLabel = SynapseTheme.CreateStatusBadge($"⏱ {_secondsRemaining}s — NEGARÁ AUTOMATICAMENTE", SynapseTheme.Warning);
+            _timerLabel.Location = new Point(20, 275);
 
             var btnDeny = new SynapseButton
             {
-                Text = "Negar (Não)",
+                Text = "✖ Negar (Não)",
                 DialogResult = DialogResult.No,
-                Location = new Point(258, 258),
-                Width = 110,
-                Height = 34,
+                Location = new Point(275, 305),
+                Width = 120,
+                Height = 36,
                 Variant = SynapseButtonVariant.Secondary
             };
 
             var btnApprove = new SynapseButton
             {
-                Text = "Permitir (Sim)",
+                Text = "✔ Permitir (Sim)",
                 DialogResult = DialogResult.Yes,
-                Location = new Point(378, 258),
-                Width = 110,
-                Height = 34,
+                Location = new Point(405, 305),
+                Width = 120,
+                Height = 36,
                 Variant = SynapseButtonVariant.Danger
             };
 
@@ -161,13 +162,21 @@ public sealed class WinFormsConfirmationPrompt : IRemoteConfirmationPrompt
                 Close();
             };
 
-            AcceptButton = btnDeny; // Default é negar
+            AcceptButton = btnDeny; // Default de segurança: NEGA POR PADRÃO
             CancelButton = btnDeny;
 
             Controls.Add(descTextBox);
             Controls.Add(_timerLabel);
             Controls.Add(btnDeny);
             Controls.Add(btnApprove);
+            pnlHeader.BringToFront();
+
+            Shown += (_, _) =>
+            {
+                descTextBox.SelectionStart = 0;
+                descTextBox.SelectionLength = 0;
+                btnDeny.Focus();
+            };
 
             _countdownTimer = new Timer { Interval = 1000 };
             _countdownTimer.Tick += (_, _) =>
@@ -181,7 +190,7 @@ public sealed class WinFormsConfirmationPrompt : IRemoteConfirmationPrompt
                 }
                 else
                 {
-                    _timerLabel.Text = $"  ⏱ {_secondsRemaining}s — negará automaticamente  ";
+                    _timerLabel.Text = $"⏱ {_secondsRemaining}s — NEGARÁ AUTOMATICAMENTE";
                 }
             };
             _countdownTimer.Start();

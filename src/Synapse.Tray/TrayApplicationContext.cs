@@ -32,40 +32,43 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly Timer _pollTimer;
     private readonly CancellationTokenSource _remoteAgentCts = new();
 
+    private readonly SynchronizationContext _syncContext;
     private IpcStatusPayload? _currentStatus;
     private bool _isDisposed;
 
     public TrayApplicationContext(IpcClient? ipcClient = null)
     {
+        _syncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _ipcClient = ipcClient ?? new IpcClient();
 
         var contextMenu = new ContextMenuStrip
         {
             Renderer = new SynapseMenuRenderer(),
-            BackColor = SynapseTheme.SurfaceAlt,
+            BackColor = SynapseTheme.Surface,
             ForeColor = SynapseTheme.TextPrimary,
-            Font = new Font(SynapseTheme.FontFamily, 9f),
-            ShowImageMargin = false
+            Font = SynapseTheme.FontBody(8.5f),
+            ShowImageMargin = false,
+            Padding = new Padding(4)
         };
 
-        _statusHeaderItem = new ToolStripMenuItem("Status: Conectando...")
+        _statusHeaderItem = new ToolStripMenuItem("● STATUS: CONECTANDO...")
         {
             Enabled = false,
             ForeColor = SynapseTheme.AccentPrimary,
-            Font = new Font(contextMenu.Font, FontStyle.Bold)
+            Font = SynapseTheme.FontHeadline(8.5f)
         };
 
         _pauseResumeItem = new ToolStripMenuItem("Pausar Sincronização", null, async (_, _) => await TogglePauseAsync());
         _reconnectItem = new ToolStripMenuItem("Reconectar GitHub", null, async (_, _) => await ReconnectAsync());
         _remoteControlItem = new ToolStripMenuItem("Controle Remoto: Desativado", null, async (_, _) => await ToggleRemoteControlAsync());
-        var quickCaptureItem = new ToolStripMenuItem("🧠 Captura Rápida (Segundo Cérebro)...", null, (_, _) => OpenQuickCapture());
-        var chatVaultItem = new ToolStripMenuItem("💬 Conversar com o Cofre (Chat & RAG)...", null, (_, _) => OpenChatVault());
-        var reviewItem = new ToolStripMenuItem("🗂️ Revisar Flashcards (SM-2)...", null, (_, _) => OpenFlashcardReview());
-        var statsItem = new ToolStripMenuItem("📊 Estatísticas & Backup...", null, (_, _) => OpenVaultStats());
-        var diagnosticsItem = new ToolStripMenuItem("Diagnóstico & Conflitos...", null, (_, _) => OpenDiagnostics());
-        var settingsItem = new ToolStripMenuItem("Configurações...", null, (_, _) => OpenSettings());
-        _openLogsItem = new ToolStripMenuItem("Abrir Pasta de Logs", null, async (_, _) => await OpenLogsFolderAsync());
-        _exitItem = new ToolStripMenuItem("Sair da Bandeja", null, (_, _) => ExitThread());
+        var quickCaptureItem = new ToolStripMenuItem("► Captura Rápida (Brain)...", null, (_, _) => OpenQuickCapture());
+        var chatVaultItem = new ToolStripMenuItem("► Chat com Cofre (RAG)...", null, (_, _) => OpenChatVault());
+        var reviewItem = new ToolStripMenuItem("► Flashcards (SM-2)...", null, (_, _) => OpenFlashcardReview());
+        var statsItem = new ToolStripMenuItem("► Estatísticas && Backup...", null, (_, _) => OpenVaultStats());
+        var diagnosticsItem = new ToolStripMenuItem("► Diagnóstico && Conflitos...", null, (_, _) => OpenDiagnostics());
+        var settingsItem = new ToolStripMenuItem("► Configurações...", null, (_, _) => OpenSettings());
+        _openLogsItem = new ToolStripMenuItem("► Abrir Pasta de Logs", null, async (_, _) => await OpenLogsFolderAsync());
+        _exitItem = new ToolStripMenuItem("✖ Sair da Bandeja", null, (_, _) => ExitThread());
 
         contextMenu.Items.Add(_statusHeaderItem);
         contextMenu.Items.Add(new ToolStripSeparator());
@@ -88,16 +91,27 @@ public sealed class TrayApplicationContext : ApplicationContext
         {
             Icon = IconGenerator.GetIconForState("Desconectado", false),
             ContextMenuStrip = contextMenu,
-            Text = "Synapse - Sincronização Obsidian",
+            Text = "Synapse (Pixel Edition)",
             Visible = true
+        };
+
+        _notifyIcon.MouseDoubleClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                OpenQuickCapture();
+            }
         };
 
         _pollTimer = new Timer { Interval = 2500 };
         _pollTimer.Tick += async (_, _) => await PollStatusAsync();
         _pollTimer.Start();
 
-        // Dispara a primeira consulta de status imediatamente
-        _ = CheckInitialOnboardingAsync();
+        // Abre a interface visual diretamente na tela do usuário
+        OpenSettings();
+
+        // Dispara a verificação inicial após inicialização do loop de mensagens
+        _syncContext.Post(async _ => await CheckInitialOnboardingAsync(), null);
     }
 
     private async Task PollStatusAsync()
@@ -257,11 +271,10 @@ public sealed class TrayApplicationContext : ApplicationContext
         var configManager = new SynapseConfigManager();
         var config = await configManager.LoadAsync();
 
-        if (!config.IsConfigured)
-        {
-            OpenSettings();
-        }
-        else
+        // Abre a janela do Synapse diretamente na tela do usuário
+        OpenSettings();
+
+        if (config.IsConfigured)
         {
             _ = StartRemoteAgentAsync(config);
         }
@@ -335,50 +348,95 @@ public sealed class TrayApplicationContext : ApplicationContext
         }
     }
 
+    private Onboarding.OnboardingForm? _settingsForm;
+
     private void OpenSettings()
     {
-        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenSettings");
-        using var form = new Onboarding.OnboardingForm();
-        if (form.ShowDialog() == DialogResult.OK)
+        _syncContext.Post(_ =>
         {
-            _ = _ipcClient.ReconnectAsync();
-            _ = PollStatusAsync();
-        }
+            _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenSettings");
+            if (_settingsForm == null || _settingsForm.IsDisposed)
+            {
+                _settingsForm = new Onboarding.OnboardingForm();
+                _settingsForm.FormClosed += (_, _) =>
+                {
+                    _ = _ipcClient.ReconnectAsync();
+                    _ = PollStatusAsync();
+                    _settingsForm = null;
+                };
+                _settingsForm.Show();
+            }
+            else
+            {
+                if (_settingsForm.WindowState == FormWindowState.Minimized)
+                {
+                    _settingsForm.WindowState = FormWindowState.Normal;
+                }
+                _settingsForm.Show();
+                _settingsForm.BringToFront();
+                _settingsForm.Activate();
+            }
+        }, null);
     }
 
     private void OpenDiagnostics()
     {
-        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenDiagnostics");
-        using var form = new Diagnostics.DiagnosticsForm();
-        form.ShowDialog();
+        _syncContext.Post(_ =>
+        {
+            _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenDiagnostics");
+            var form = new Diagnostics.DiagnosticsForm();
+            form.Show();
+            form.BringToFront();
+            form.Activate();
+        }, null);
     }
 
     private void OpenQuickCapture()
     {
-        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenQuickCapture");
-        using var form = new QuickCapture.QuickCaptureForm();
-        form.ShowDialog();
+        _syncContext.Post(_ =>
+        {
+            _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenQuickCapture");
+            var form = new QuickCapture.QuickCaptureForm();
+            form.Show();
+            form.BringToFront();
+            form.Activate();
+        }, null);
     }
 
     private void OpenChatVault()
     {
-        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenChatVault");
-        using var form = new Chat.ChatVaultForm();
-        form.ShowDialog();
+        _syncContext.Post(_ =>
+        {
+            _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenChatVault");
+            var form = new Chat.ChatVaultForm();
+            form.Show();
+            form.BringToFront();
+            form.Activate();
+        }, null);
     }
 
     private void OpenFlashcardReview()
     {
-        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenFlashcardReview");
-        using var form = new Review.FlashcardReviewForm();
-        form.ShowDialog();
+        _syncContext.Post(_ =>
+        {
+            _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenFlashcardReview");
+            var form = new Review.FlashcardReviewForm();
+            form.Show();
+            form.BringToFront();
+            form.Activate();
+        }, null);
     }
 
     private void OpenVaultStats()
     {
-        _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenVaultStats");
-        using var form = new Metrics.VaultStatsForm();
-        form.ShowDialog();
+        _syncContext.Post(_ =>
+        {
+            _ = SynapseActivityLogger.Instance.LogClickAsync("TrayMenu", "OpenVaultStats");
+            var form = new Metrics.VaultStatsForm();
+            form.Show();
+            form.BringToFront();
+            form.Activate();
+        }, null);
     }
 
     private static string TruncateText(string text, int maxLength)

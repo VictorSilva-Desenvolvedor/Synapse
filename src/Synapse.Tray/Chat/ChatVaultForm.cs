@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Drawing.Drawing2D;
 using Synapse.Brain.Models;
 using Synapse.Brain.Providers;
 using Synapse.Brain.Services;
@@ -30,24 +31,23 @@ public sealed class ChatVaultForm : Form
     {
         _configManager = configManager ?? new SynapseConfigManager();
 
-        Text = "Synapse — Conversar com o Segundo Cérebro";
-        Size = new Size(880, 680);
+        Text = "Synapse — Conversar com o Segundo Cérebro [Pixel Edition]";
+        Size = new Size(920, 700);
         StartPosition = FormStartPosition.CenterScreen;
         SynapseTheme.ApplyFormChrome(this);
 
         // Header Panel
         var pnlHeader = SynapseTheme.CreateHeaderBar(
-            "Conversar com o Segundo Cérebro",
-            "Guarde pensamentos, tarefas ou tire dúvidas sobre as suas anotações do cofre.",
-            64);
-        Controls.Add(pnlHeader);
+            "► SEGUNDO CÉREBRO (CHAT && RAG)",
+            "Guarde pensamentos, tarefas ou tire dúvidas sobre as anotações do seu cofre.",
+            70);
 
         // Split Container (Top: Chat History, Bottom: Sources)
         var splitContainer = new SplitContainer
         {
             Dock = DockStyle.Fill,
             Orientation = Orientation.Horizontal,
-            SplitterDistance = 420,
+            SplitterDistance = 410,
             BackColor = SynapseTheme.Border
         };
 
@@ -59,28 +59,27 @@ public sealed class ChatVaultForm : Form
             BackColor = SynapseTheme.Background,
             ForeColor = SynapseTheme.TextPrimary,
             BorderStyle = BorderStyle.None,
-            Font = new Font(SynapseTheme.FontFamily, 10f, FontStyle.Regular),
-            Padding = new Padding(20, 16, 20, 16)
+            Font = SynapseTheme.FontBody(8.5f),
+            Padding = new Padding(16, 12, 16, 12)
         };
         splitContainer.Panel1.Controls.Add(_txtHistory);
         splitContainer.Panel1.BackColor = SynapseTheme.Background;
 
-        // Estado vazio do histórico: some assim que a primeira mensagem é escrita
-        // (evita a tela ficar com uma área enorme e sem graça antes da conversa começar).
+        // Estado vazio do histórico
         _pnlHistoryEmpty = new Panel { Dock = DockStyle.Fill, BackColor = SynapseTheme.Background };
         _pnlHistoryEmpty.Controls.Add(SynapseTheme.CreateEmptyState(
-            "Pronto para conversar.\n\nConte algo que queira guardar ou pergunte sobre suas notas.",
+            "● Terminal pronto para conversar.\n\nConte algo que queira guardar ou faça uma pergunta sobre suas notas.",
             SynapseTheme.Background));
         splitContainer.Panel1.Controls.Add(_pnlHistoryEmpty);
         _pnlHistoryEmpty.BringToFront();
 
         // Sources Panel
-        var pnlSources = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8), BackColor = SynapseTheme.SurfaceAlt };
+        var pnlSources = new Panel { Dock = DockStyle.Fill, Padding = new Padding(8), BackColor = SynapseTheme.Surface };
         var lblSourcesHeader = new Label
         {
-            Text = "Notas de Referência Citadas (duplo clique para abrir)",
-            Font = SynapseTheme.FontBodyBold(9f),
-            ForeColor = SynapseTheme.TextSecondary,
+            Text = "► NOTAS DE REFERÊNCIA CITADAS (duplo clique para abrir):",
+            Font = SynapseTheme.FontHeadline(8f),
+            ForeColor = SynapseTheme.AccentPrimary,
             Dock = DockStyle.Top,
             Height = 24
         };
@@ -95,8 +94,8 @@ public sealed class ChatVaultForm : Form
         };
         SynapseTheme.StyleListView(_lstSources);
         _lstSources.Columns.Add("Nota Citada", 220);
-        _lstSources.Columns.Add("Similaridade", 90);
-        _lstSources.Columns.Add("Trecho", 520);
+        _lstSources.Columns.Add("Similaridade", 100);
+        _lstSources.Columns.Add("Trecho", 540);
         _lstSources.DoubleClick += (_, _) => OpenSelectedSource();
         SynapseTheme.FillLastColumn(_lstSources, 200);
 
@@ -107,48 +106,54 @@ public sealed class ChatVaultForm : Form
         pnlSources.Controls.Add(_lstSources);
         pnlSources.Controls.Add(lblSourcesHeader);
         splitContainer.Panel2.Controls.Add(pnlSources);
-        splitContainer.Panel2.BackColor = SynapseTheme.SurfaceAlt;
-
-        Controls.Add(splitContainer);
+        splitContainer.Panel2.BackColor = SynapseTheme.Surface;
 
         // Footer Input Panel
         var pnlFooter = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 76,
-            BackColor = SynapseTheme.SurfaceAlt,
+            Height = 80,
+            BackColor = SynapseTheme.Surface,
             Padding = new Padding(16, 12, 16, 12)
+        };
+        pnlFooter.Paint += (s, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+            using var penDark = new Pen(SynapseTheme.Border, 2);
+            e.Graphics.DrawLine(penDark, 0, 0, pnlFooter.Width, 0);
+            using var penLight = new Pen(SynapseTheme.BorderLight, 1);
+            e.Graphics.DrawLine(penLight, 0, 1, pnlFooter.Width, 1);
         };
 
         _btnSaveNote = new SynapseButton
         {
             Text = "Salvar como Nota",
-            Width = 180,
+            Width = 190,
             Height = 36,
-            Variant = SynapseButtonVariant.Primary,
+            Variant = SynapseButtonVariant.Secondary,
             Enabled = false,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
-        _btnSaveNote.Location = new Point(pnlFooter.Width - _btnSaveNote.Width - 16, 12);
+        _btnSaveNote.Location = new Point(pnlFooter.Width - _btnSaveNote.Width - 16, 14);
         _btnSaveNote.Click += async (_, _) => await SaveAnswerAsNoteAsync();
 
         _btnSend = new SynapseButton
         {
             Text = "Enviar",
-            Width = 120,
+            Width = 110,
             Height = 36,
-            Variant = SynapseButtonVariant.Secondary,
+            Variant = SynapseButtonVariant.Primary,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
-        _btnSend.Location = new Point(_btnSaveNote.Left - _btnSend.Width - 10, 12);
+        _btnSend.Location = new Point(_btnSaveNote.Left - _btnSend.Width - 10, 14);
         _btnSend.Click += async (_, _) => await SendQuestionAsync();
 
         _txtInput = new TextBox
         {
-            Location = new Point(16, 14),
+            Location = new Point(16, 16),
             Width = _btnSend.Left - 16 - 10,
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
-            Font = new Font(SynapseTheme.FontFamily, 10.5f, FontStyle.Regular)
+            Font = SynapseTheme.FontBody(9f)
         };
         SynapseTheme.StyleInput(_txtInput);
         _txtInput.KeyDown += async (_, e) =>
@@ -173,6 +178,9 @@ public sealed class ChatVaultForm : Form
         pnlFooter.Controls.Add(_btnSend);
         pnlFooter.Controls.Add(_btnSaveNote);
         pnlFooter.Controls.Add(_lblStatus);
+
+        Controls.Add(splitContainer);
+        Controls.Add(pnlHeader);
         Controls.Add(pnlFooter);
 
         Shown += async (_, _) => await InitializeRagAsync();
@@ -344,29 +352,25 @@ public sealed class ChatVaultForm : Form
 
         var messageStart = _txtHistory.TextLength;
 
-        _txtHistory.SelectionFont = SynapseTheme.FontBodyBold(9f);
+        _txtHistory.SelectionFont = SynapseTheme.FontHeadline(8.5f);
         _txtHistory.SelectionColor = accentColor;
         _txtHistory.AppendText($"{sender} · {DateTime.Now:HH:mm}\n");
 
-        _txtHistory.SelectionFont = isSystem ? SynapseTheme.FontCaptionItalic(9.5f) : SynapseTheme.FontBody(10f);
+        _txtHistory.SelectionFont = isSystem ? SynapseTheme.FontCaptionItalic(8f) : SynapseTheme.FontBody(8.5f);
         _txtHistory.SelectionColor = isSystem ? SynapseTheme.TextSecondary : SynapseTheme.TextPrimary;
         _txtHistory.AppendText($"{message}\n");
 
         if (!isSystem)
         {
-            // Pinta o fundo do bloco recém-escrito com um tom sutil, dando um efeito de
-            // "bolha de chat" alinhada à direita (usuário) ou à esquerda (assistente).
             var messageEnd = _txtHistory.TextLength;
             _txtHistory.Select(messageStart, messageEnd - messageStart);
-            _txtHistory.SelectionBackColor = isUser ? UserBubbleBackground : AssistantBubbleBackground;
+            _txtHistory.SelectionBackColor = isUser ? SynapseTheme.SurfaceAlt : SynapseTheme.Surface;
         }
 
-        // Volta a formatação padrão antes de escrever o espaçamento em branco entre mensagens,
-        // senão o RichTextBox propaga o fundo colorido da bolha para a linha vazia seguinte.
         _txtHistory.Select(_txtHistory.TextLength, 0);
         _txtHistory.SelectionBackColor = _txtHistory.BackColor;
         _txtHistory.SelectionColor = SynapseTheme.TextPrimary;
-        _txtHistory.SelectionFont = SynapseTheme.FontBody(10f);
+        _txtHistory.SelectionFont = SynapseTheme.FontBody(8.5f);
         _txtHistory.AppendText("\n");
 
         // RichTextBox.AppendText/Select deixam o trecho recém-inserido "selecionado" internamente,

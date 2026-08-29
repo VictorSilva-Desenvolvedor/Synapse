@@ -1,3 +1,4 @@
+using System.Drawing.Drawing2D;
 using Synapse.Brain.SpacedRepetition;
 using Synapse.Tray.UI;
 
@@ -20,9 +21,8 @@ public sealed class FlashcardReviewForm : Form
     public FlashcardReviewForm(IReadOnlyList<FlashcardItem>? cards = null)
     {
         _cards = cards?.ToList() ?? GenerateSampleCards();
-
-        Text = "Synapse — Revisão Ativa (Flashcards & SM-2)";
-        Size = new Size(680, 540);
+        Text = "Synapse — Revisão Ativa (Flashcards & SM-2) [Pixel Edition]";
+        Size = new Size(720, 560);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -32,66 +32,82 @@ public sealed class FlashcardReviewForm : Form
         var pnlHeader = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 55,
-            BackColor = SynapseTheme.SurfaceAlt,
-            Padding = new Padding(16, 12, 16, 12)
+            Height = 65,
+            BackColor = SynapseTheme.Surface,
+            Padding = new Padding(0)
+        };
+        pnlHeader.Paint += (s, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+            using var penDark = new Pen(SynapseTheme.Border, 2);
+            e.Graphics.DrawLine(penDark, 0, pnlHeader.Height - 2, pnlHeader.Width, pnlHeader.Height - 2);
+            using var penLight = new Pen(SynapseTheme.BorderLight, 1);
+            e.Graphics.DrawLine(penLight, 0, pnlHeader.Height - 1, pnlHeader.Width, pnlHeader.Height - 1);
+        };
+
+        var accent = new Panel
+        {
+            Location = new Point(0, 0),
+            Size = new Size(6, 65),
+            BackColor = SynapseTheme.AccentPrimary,
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left
         };
 
         _lblCounter = new Label
         {
-            Text = "Card 1 de 1",
-            Font = SynapseTheme.FontBodyBold(10f),
+            Text = "► CARD 1 DE 1",
+            Font = SynapseTheme.FontHeadline(8.5f),
             ForeColor = SynapseTheme.TextPrimary,
-            Location = new Point(16, 16),
+            Location = new Point(16, 12),
             AutoSize = true
         };
 
         _lblSource = new Label
         {
-            Text = "Origem: Nota",
-            Font = SynapseTheme.FontCaption(9f),
+            Text = "Origem: Notas/Arquitetura.md",
+            Font = SynapseTheme.FontCaption(8f),
             ForeColor = SynapseTheme.TextSecondary,
-            Location = new Point(200, 18),
+            Location = new Point(16, 38),
             AutoSize = true
         };
 
+        pnlHeader.Controls.Add(accent);
         pnlHeader.Controls.Add(_lblCounter);
         pnlHeader.Controls.Add(_lblSource);
         Controls.Add(pnlHeader);
 
-        // Question Panel
+        // Question Panel (RPG Item / Quest Card Style)
         var pnlCard = new RoundedPanel
         {
-            Location = new Point(30, 80),
-            Size = new Size(605, 300),
-            BackColor = SynapseTheme.Surface,
-            BorderColor = SynapseTheme.Border,
-            Radius = SynapseTheme.RadiusLarge,
-            Padding = new Padding(24)
+            Location = new Point(24, 78),
+            Size = new Size(656, 310),
+            BackColor = SynapseTheme.SurfaceAlt,
+            BorderColor = SynapseTheme.BorderLight,
+            Padding = new Padding(20)
         };
 
         _lblQuestion = new Label
         {
-            Location = new Point(24, 24),
-            Size = new Size(556, 100),
-            Font = SynapseTheme.FontHeadline(13f),
+            Location = new Point(20, 20),
+            Size = new Size(616, 110),
+            Font = SynapseTheme.FontHeadline(10.5f),
             ForeColor = SynapseTheme.TextPrimary,
             Text = "Carregando pergunta..."
         };
 
         var sep = new Panel
         {
-            Location = new Point(24, 130),
-            Size = new Size(556, 1),
+            Location = new Point(20, 138),
+            Size = new Size(616, 2),
             BackColor = SynapseTheme.Border
         };
 
         _lblAnswer = new Label
         {
-            Location = new Point(24, 146),
-            Size = new Size(556, 140),
-            Font = SynapseTheme.FontBody(11f),
-            ForeColor = SynapseTheme.TextSecondary,
+            Location = new Point(20, 150),
+            Size = new Size(616, 140),
+            Font = SynapseTheme.FontBody(9f),
+            ForeColor = SynapseTheme.NeonGreen,
             Text = "...",
             Visible = false
         };
@@ -104,11 +120,10 @@ public sealed class FlashcardReviewForm : Form
         // Action Buttons
         _btnReveal = new SynapseButton
         {
-            Text = "Mostrar Resposta (Espaço)",
-            Location = new Point(230, 400),
-            Size = new Size(220, 46),
-            Variant = SynapseButtonVariant.Secondary,
-            Radius = SynapseTheme.RadiusMedium
+            Text = "► Mostrar Resposta (Espaço)",
+            Location = new Point(220, 410),
+            Size = new Size(280, 42),
+            Variant = SynapseButtonVariant.Primary
         };
         _btnReveal.Click += (_, _) => RevealAnswer();
         Controls.Add(_btnReveal);
@@ -116,15 +131,15 @@ public sealed class FlashcardReviewForm : Form
         // Rating Buttons Panel (Hidden until reveal)
         _pnlRatings = new Panel
         {
-            Location = new Point(30, 396),
-            Size = new Size(605, 60),
+            Location = new Point(24, 404),
+            Size = new Size(656, 60),
             Visible = false
         };
 
-        var btnAgain = CreateRatingButton("🔴 Errei (0)", SynapseTheme.Error, 0, () => GradeCard(0));
-        var btnHard = CreateRatingButton("🟡 Difícil (3)", SynapseTheme.Warning, 155, () => GradeCard(3));
-        var btnGood = CreateRatingButton("🟢 Bom (4)", SynapseTheme.AccentPrimary, 310, () => GradeCard(4));
-        var btnEasy = CreateRatingButton("🔵 Fácil (5)", SynapseTheme.AccentSecondary, 465, () => GradeCard(5));
+        var btnAgain = CreateRatingButton("✖ Errei (0)", SynapseTheme.Error, 0, () => GradeCard(0));
+        var btnHard = CreateRatingButton("▲ Difícil (3)", SynapseTheme.Warning, 168, () => GradeCard(3));
+        var btnGood = CreateRatingButton("● Bom (4)", SynapseTheme.AccentPrimary, 336, () => GradeCard(4));
+        var btnEasy = CreateRatingButton("★ Fácil (5)", SynapseTheme.NeonGreen, 504, () => GradeCard(5));
 
         _pnlRatings.Controls.Add(btnAgain);
         _pnlRatings.Controls.Add(btnHard);
@@ -140,10 +155,10 @@ public sealed class FlashcardReviewForm : Form
         var btn = new SynapseButton
         {
             Text = text,
-            Location = new Point(left, 5),
-            Size = new Size(135, 46),
+            Location = new Point(left, 6),
+            Size = new Size(150, 42),
             FillOverride = color,
-            Radius = SynapseTheme.RadiusMedium
+            Font = SynapseTheme.FontHeadline(8f)
         };
         btn.Click += (_, _) => onClick();
         return btn;
@@ -185,7 +200,7 @@ public sealed class FlashcardReviewForm : Form
         }
 
         var card = _cards[_currentIndex];
-        _lblCounter.Text = $"Card {_currentIndex + 1} de {_cards.Count}";
+        _lblCounter.Text = $"► CARD {_currentIndex + 1} DE {_cards.Count}";
         _lblSource.Text = $"Origem: {Path.GetFileNameWithoutExtension(card.SourceNotePath)}";
         _lblQuestion.Text = card.Question;
         _lblAnswer.Text = card.Answer;

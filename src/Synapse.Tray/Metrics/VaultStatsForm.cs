@@ -1,3 +1,4 @@
+using System.Drawing.Drawing2D;
 using Synapse.Sync.Backup;
 using Synapse.Sync.Config;
 using Synapse.Sync.Metrics;
@@ -23,8 +24,8 @@ public sealed class VaultStatsForm : Form
     {
         _configManager = configManager ?? new SynapseConfigManager();
 
-        Text = "Synapse — Estatísticas & Backup do Cofre";
-        Size = new Size(740, 580);
+        Text = "Synapse — Estatísticas && Backup do Cofre [Pixel Edition]";
+        Size = new Size(760, 620);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -32,23 +33,23 @@ public sealed class VaultStatsForm : Form
 
         // Header Panel
         var pnlHeader = SynapseTheme.CreateHeaderBar(
-            "📊 Métricas de Produtividade & Saúde do Cofre",
+            "► ESTATÍSTICAS && BACKUP DO COFRE",
             "Acompanhe seu volume de escrita, distribuição temática e gere backups seguros.",
-            64);
+            70);
         Controls.Add(pnlHeader);
 
         // Cards Panel
         var pnlCards = new Panel
         {
             Location = new Point(20, 84),
-            Size = new Size(685, 120),
+            Size = new Size(705, 120),
             BackColor = SynapseTheme.Background
         };
 
-        var card1 = CreateKpiCard("📝 Total de Notas", out _lblNotes, 0, SynapseTheme.AccentPrimary);
-        var card2 = CreateKpiCard("✍️ Volume de Palavras", out _lblWords, 172, SynapseTheme.AccentSecondary);
-        var card3 = CreateKpiCard("⏱️ Tempo de Leitura", out _lblReadingTime, 344, SynapseTheme.Warning);
-        var card4 = CreateKpiCard("⚡ Atividade Recente", out _lblRecentActivity, 516, SynapseTheme.AccentPrimary);
+        var card1 = CreateKpiCard("TOTAL DE NOTAS", out _lblNotes, 0, SynapseTheme.NeonGreen);
+        var card2 = CreateKpiCard("TOTAL PALAVRAS", out _lblWords, 178, SynapseTheme.AccentPrimary);
+        var card3 = CreateKpiCard("TEMPO LEITURA", out _lblReadingTime, 356, SynapseTheme.Warning);
+        var card4 = CreateKpiCard("ATIVIDADE (7D)", out _lblRecentActivity, 534, SynapseTheme.AccentSecondary);
 
         pnlCards.Controls.Add(card1);
         pnlCards.Controls.Add(card2);
@@ -59,10 +60,10 @@ public sealed class VaultStatsForm : Form
         // Categories Header
         var lblCatHeader = new Label
         {
-            Text = "Distribuição por Categorias (PKM)",
-            Font = SynapseTheme.FontHeadline(10.5f),
-            ForeColor = SynapseTheme.TextPrimary,
-            Location = new Point(20, 220),
+            Text = "► DISTRIBUIÇÃO POR CATEGORIAS (PKM):",
+            Font = SynapseTheme.FontHeadline(8.5f),
+            ForeColor = SynapseTheme.AccentPrimary,
+            Location = new Point(20, 218),
             AutoSize = true
         };
         Controls.Add(lblCatHeader);
@@ -70,48 +71,60 @@ public sealed class VaultStatsForm : Form
         // Categories ListView
         _lstCategories = new ListView
         {
-            Location = new Point(20, 248),
-            Size = new Size(685, 220),
+            Location = new Point(20, 246),
+            Size = new Size(705, 260),
             View = View.Details,
             FullRowSelect = true,
             GridLines = false
         };
         SynapseTheme.StyleListView(_lstCategories);
-        _lstCategories.Columns.Add("Categoria", 280);
-        _lstCategories.Columns.Add("Quantidade de Notas", 160);
+        _lstCategories.Columns.Add("Categoria", 300);
+        _lstCategories.Columns.Add("Qtd. Notas", 180);
         _lstCategories.Columns.Add("Proporção", 200);
+        SynapseTheme.FillLastColumn(_lstCategories, 180);
         Controls.Add(_lstCategories);
 
         // Footer Actions
         var pnlFooter = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 65,
-            BackColor = SynapseTheme.SurfaceAlt,
+            Height = 70,
+            BackColor = SynapseTheme.Surface,
             Padding = new Padding(16, 12, 16, 12)
+        };
+        pnlFooter.Paint += (s, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+            using var penDark = new Pen(SynapseTheme.Border, 2);
+            e.Graphics.DrawLine(penDark, 0, 0, pnlFooter.Width, 0);
+            using var penLight = new Pen(SynapseTheme.BorderLight, 1);
+            e.Graphics.DrawLine(penLight, 0, 1, pnlFooter.Width, 1);
         };
 
         var btnRefresh = new SynapseButton
         {
-            Text = "🔄 Atualizar Métricas",
-            Location = new Point(20, 12),
-            Size = new Size(160, 38),
+            Text = "► Atualizar",
+            Location = new Point(20, 16),
+            Size = new Size(160, 36),
             Variant = SynapseButtonVariant.Secondary
         };
         btnRefresh.Click += async (_, _) => await LoadMetricsAsync();
 
         _btnExportBackup = new SynapseButton
         {
-            Text = "🔒 Exportar Backup Criptografado...",
-            Location = new Point(460, 12),
-            Size = new Size(245, 38),
-            Variant = SynapseButtonVariant.Primary
+            Text = "► Exportar Backup (.enc)...",
+            Location = new Point(pnlFooter.Width - 280, 16),
+            Size = new Size(260, 36),
+            Variant = SynapseButtonVariant.Primary,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
         _btnExportBackup.Click += async (_, _) => await ExportBackupAsync();
 
         pnlFooter.Controls.Add(btnRefresh);
         pnlFooter.Controls.Add(_btnExportBackup);
         Controls.Add(pnlFooter);
+        pnlHeader.BringToFront();
+        pnlFooter.BringToFront();
 
         Shown += async (_, _) => await LoadMetricsAsync();
     }
@@ -121,31 +134,31 @@ public sealed class VaultStatsForm : Form
         var panel = new RoundedPanel
         {
             Location = new Point(left, 0),
-            Size = new Size(160, 112),
-            BackColor = SynapseTheme.Surface,
-            BorderColor = SynapseTheme.Border,
-            Radius = SynapseTheme.RadiusMedium,
-            Padding = new Padding(12)
+            Size = new Size(168, 115),
+            BackColor = SynapseTheme.SurfaceAlt,
+            BorderColor = SynapseTheme.BorderLight,
+            Padding = new Padding(10)
         };
 
-        var accentBar = new Panel { Location = new Point(0, 0), Size = new Size(36, 3), BackColor = accentColor };
+        var accentBar = new Panel { Location = new Point(2, 2), Size = new Size(164, 3), BackColor = accentColor };
 
         var lblT = new Label
         {
             Text = title,
-            Font = SynapseTheme.FontBodyBold(8.5f),
+            Font = SynapseTheme.FontHeadline(7.5f),
             ForeColor = SynapseTheme.TextSecondary,
-            Location = new Point(12, 14),
-            Size = new Size(136, 32)
+            Location = new Point(8, 14),
+            Size = new Size(150, 24)
         };
 
         valueLabel = new Label
         {
             Text = "...",
-            Font = SynapseTheme.FontDisplay(15f),
+            Font = SynapseTheme.FontHeadline(10.5f),
             ForeColor = SynapseTheme.TextPrimary,
-            Location = new Point(12, 62),
-            Size = new Size(136, 35)
+            Location = new Point(8, 54),
+            Size = new Size(150, 40),
+            TextAlign = ContentAlignment.MiddleLeft
         };
 
         panel.Controls.Add(accentBar);

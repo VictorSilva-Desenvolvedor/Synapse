@@ -1,252 +1,350 @@
+using System.Drawing.Drawing2D;
+using System.Drawing.Text;
+using System.Reflection;
+using System.Runtime.InteropServices;
+
 namespace Synapse.Tray.UI;
 
 /// <summary>
-/// Identidade visual central do Synapse: paleta escura, tipografia e espaçamentos
-/// compartilhados por todas as janelas do app. Baseado no design system "Synapse Dark"
-/// (Space Grotesk/Inter, acento esmeralda #10B981 + índigo #6366F1, cantos arredondados).
+/// Design System Pixel Art (8-bit / 16-bit) do Synapse.Tray.
+/// Substitui o antigo tema dark por tipografia pixelada (Silkscreen / Press Start 2P),
+/// paleta saturada de alto contraste, bordas retas com bevels 3D e renderização nítida.
 /// </summary>
 public static class SynapseTheme
 {
+    #region Cores Pixel Art (Paleta Cyber-Synapse 16-bit)
+
     // Fundos
-    public static readonly Color Background = Color.FromArgb(11, 11, 15);
-    public static readonly Color Surface = Color.FromArgb(31, 31, 35);
-    public static readonly Color SurfaceAlt = Color.FromArgb(24, 24, 27);
-    public static readonly Color SurfaceInput = Color.FromArgb(24, 24, 27);
-    public static readonly Color Border = Color.FromArgb(42, 42, 48);
-    public static readonly Color BorderStrong = Color.FromArgb(63, 63, 70);
+    public static readonly Color Background = Color.FromArgb(13, 17, 23);       // #0D1117 (Void / Fundo Principal)
+    public static readonly Color Surface = Color.FromArgb(22, 27, 34);          // #161B22 (Painel / Header)
+    public static readonly Color SurfaceAlt = Color.FromArgb(33, 38, 45);       // #21262D (Card / Bevel Base)
+    public static readonly Color SurfaceInput = Color.FromArgb(18, 22, 28);     // #12161C (Caixas de Texto)
+
+    // Bordas e Bevels 8-bit
+    public static readonly Color Border = Color.FromArgb(48, 54, 61);           // #30363D (Sombra escura)
+    public static readonly Color BorderLight = Color.FromArgb(139, 148, 158);   // #8B949E (Realce médio)
+    public static readonly Color BorderHighlight = Color.FromArgb(240, 246, 252);// #F0F6FC (Realce claro / Luz)
+    public static readonly Color BorderStrong = Color.FromArgb(88, 96, 105);    // #586069
 
     // Texto
-    public static readonly Color TextPrimary = Color.FromArgb(244, 244, 245);
-    public static readonly Color TextSecondary = Color.FromArgb(161, 161, 170);
-    public static readonly Color TextDisabled = Color.FromArgb(113, 113, 122);
+    public static readonly Color TextPrimary = Color.FromArgb(240, 246, 252);   // Branco Pixel
+    public static readonly Color TextSecondary = Color.FromArgb(139, 148, 158); // Cinza Pixel Claro
+    public static readonly Color TextDisabled = Color.FromArgb(72, 79, 88);     // Cinza Escuro
 
-    // Acentos
-    public static readonly Color AccentPrimary = Color.FromArgb(16, 185, 129);
-    public static readonly Color AccentPrimaryHover = Color.FromArgb(5, 150, 105);
-    public static readonly Color AccentPrimaryPressed = Color.FromArgb(4, 120, 87);
-    public static readonly Color AccentSecondary = Color.FromArgb(99, 102, 241);
-    public static readonly Color AccentSecondaryHover = Color.FromArgb(79, 82, 221);
+    // Acentos Retrô
+    public static readonly Color AccentPrimary = Color.FromArgb(0, 229, 255);        // Ciano Elétrico
+    public static readonly Color AccentPrimaryHover = Color.FromArgb(77, 240, 255);
+    public static readonly Color AccentPrimaryPressed = Color.FromArgb(0, 180, 204);
 
-    // Estados
-    public static readonly Color Error = Color.FromArgb(239, 68, 68);
-    public static readonly Color Warning = Color.FromArgb(245, 158, 11);
-    public static readonly Color Success = Color.FromArgb(16, 185, 129);
-    public static readonly Color Info = Color.FromArgb(99, 102, 241);
+    public static readonly Color AccentSecondary = Color.FromArgb(189, 0, 255);      // Roxo Arcade / IA Brain
+    public static readonly Color AccentSecondaryHover = Color.FromArgb(209, 64, 255);
+    public static readonly Color AccentSecondaryPressed = Color.FromArgb(150, 0, 204);
 
-    public const string FontFamily = "Segoe UI";
-    public const string FontFamilyMono = "Consolas";
+    public static readonly Color NeonGreen = Color.FromArgb(0, 255, 102);            // Verde Terminal / Sync
+    public static readonly Color Success = Color.FromArgb(0, 255, 102);
+    public static readonly Color Warning = Color.FromArgb(255, 204, 0);              // Âmbar CRT / Conflito
+    public static readonly Color Error = Color.FromArgb(255, 51, 68);                // Vermelho Carmesim
+    public static readonly Color Info = Color.FromArgb(0, 229, 255);
 
-    public const int RadiusSmall = 6;
-    public const int RadiusMedium = 8;
-    public const int RadiusLarge = 12;
+    #endregion
 
-    public static Font FontDisplay(float size = 16f) => new(FontFamily, size, FontStyle.Bold);
-    public static Font FontHeadline(float size = 12f) => new(FontFamily, size, FontStyle.Bold);
-    public static Font FontBody(float size = 9.5f) => new(FontFamily, size, FontStyle.Regular);
-    public static Font FontBodyBold(float size = 9.5f) => new(FontFamily, size, FontStyle.Bold);
-    public static Font FontCaption(float size = 8.5f) => new(FontFamily, size, FontStyle.Regular);
-    public static Font FontCaptionItalic(float size = 8.5f) => new(FontFamily, size, FontStyle.Italic);
-    public static Font FontMono(float size = 9.5f) => new(FontFamilyMono, size, FontStyle.Regular);
+    #region Tipografia Pixel Art Embutida (Silkscreen & Press Start 2P)
 
-    /// <summary>Aplica o pano de fundo escuro padrão a uma janela.</summary>
+    private static readonly PrivateFontCollection FontCollection = new();
+    private static readonly FontFamily? SilkscreenFamily;
+    private static readonly FontFamily? PressStartFamily;
+
+    public const string FallbackFontFamily = "Consolas";
+    public const string FallbackFontFamilyMono = "Consolas";
+
+    static SynapseTheme()
+    {
+        try
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            foreach (var resourceName in asm.GetManifestResourceNames())
+            {
+                if (resourceName.EndsWith(".ttf", StringComparison.OrdinalIgnoreCase))
+                {
+                    using var stream = asm.GetManifestResourceStream(resourceName);
+                    if (stream != null)
+                    {
+                        var data = new byte[stream.Length];
+                        stream.ReadExactly(data, 0, data.Length);
+                        var fontPtr = Marshal.AllocCoTaskMem(data.Length);
+                        Marshal.Copy(data, 0, fontPtr, data.Length);
+                        FontCollection.AddMemoryFont(fontPtr, data.Length);
+                    }
+                }
+            }
+
+            SilkscreenFamily = FontCollection.Families.FirstOrDefault(f => f.Name.Contains("Silkscreen", StringComparison.OrdinalIgnoreCase))
+                               ?? FontCollection.Families.FirstOrDefault();
+            PressStartFamily = FontCollection.Families.FirstOrDefault(f => f.Name.Contains("Press Start 2P", StringComparison.OrdinalIgnoreCase))
+                               ?? SilkscreenFamily;
+        }
+        catch
+        {
+            // Fallback gracioso para fontes monospace nativas
+        }
+    }
+
+    public static string FontFamily => SilkscreenFamily?.Name ?? FallbackFontFamily;
+    public static string FontFamilyMono => FallbackFontFamilyMono;
+
+    public static Font FontDisplay(float size = 10.5f) =>
+        PressStartFamily != null
+            ? new Font(PressStartFamily, size, FontStyle.Regular)
+            : SilkscreenFamily != null
+                ? new Font(SilkscreenFamily, size, FontStyle.Bold)
+                : new Font(FallbackFontFamily, size, FontStyle.Bold);
+
+    public static Font FontHeadline(float size = 8.5f) =>
+        SilkscreenFamily != null
+            ? new Font(SilkscreenFamily, size, FontStyle.Bold)
+            : PressStartFamily != null
+                ? new Font(PressStartFamily, size, FontStyle.Regular)
+                : new Font(FallbackFontFamily, size, FontStyle.Bold);
+
+    public static Font FontBody(float size = 8.5f) =>
+        SilkscreenFamily != null
+            ? new Font(SilkscreenFamily, size, FontStyle.Regular)
+            : new Font(FallbackFontFamily, size, FontStyle.Regular);
+
+    public static Font FontBodyBold(float size = 8.5f) =>
+        SilkscreenFamily != null
+            ? new Font(SilkscreenFamily, size, FontStyle.Bold)
+            : new Font(FallbackFontFamily, size, FontStyle.Bold);
+
+    public static Font FontCaption(float size = 8f) =>
+        SilkscreenFamily != null
+            ? new Font(SilkscreenFamily, size, FontStyle.Regular)
+            : new Font(FallbackFontFamily, size, FontStyle.Regular);
+
+    public static Font FontCaptionItalic(float size = 8f) =>
+        SilkscreenFamily != null
+            ? new Font(SilkscreenFamily, size, FontStyle.Regular)
+            : new Font(FallbackFontFamily, size, FontStyle.Italic);
+
+    public static Font FontMono(float size = 9f) =>
+        new(FallbackFontFamilyMono, size, FontStyle.Regular);
+
+    public static Font FontPixel(float size = 8.5f, FontStyle style = FontStyle.Regular) =>
+        SilkscreenFamily != null
+            ? new Font(SilkscreenFamily, size, style)
+            : new Font(FallbackFontFamily, size, style);
+
+    #endregion
+
+    #region Helpers Visuais e Desenho 8-Bit
+
+    /// <summary>Aplica o pano de fundo escuro pixel art e fonte global a um formulário.</summary>
     public static void ApplyFormChrome(Form form)
     {
-        // Layouts usam coordenadas em pixel fixas; AutoScaleMode.Font (padrão) reescala
-        // de forma não-uniforme conforme a métrica da fonte ambiente e pode desalinhar/
-        // sobrepor controles em DPIs diferentes do monitor de desenvolvimento. Dpi escala
-        // de forma previsível e uniforme por um único fator.
         form.AutoScaleMode = AutoScaleMode.Dpi;
         form.BackColor = Background;
         form.ForeColor = TextPrimary;
         form.Font = FontBody();
     }
 
-    /// <summary>Cria a barra de topo escura padrão (título + subtítulo) usada em todas as janelas.</summary>
-    public static Panel CreateHeaderBar(string title, string subtitle, int height = 60)
+    /// <summary>Desenha uma moldura com relevo 3D 8-bit (estilo janela de RPG/Arcade).</summary>
+    public static void DrawPixelBevel(Graphics g, Rectangle rect, Color fill, Color topLight, Color bottomShadow, int thickness = 2)
+    {
+        g.SmoothingMode = SmoothingMode.None;
+        g.InterpolationMode = InterpolationMode.NearestNeighbor;
+
+        // Fundo
+        using var brush = new SolidBrush(fill);
+        g.FillRectangle(brush, rect);
+
+        // Borda Superior e Esquerda (Luz)
+        using var penLight = new Pen(topLight, thickness);
+        g.DrawLine(penLight, rect.Left, rect.Top, rect.Right - 1, rect.Top);
+        g.DrawLine(penLight, rect.Left, rect.Top, rect.Left, rect.Bottom - 1);
+
+        // Borda Inferior e Direita (Sombra)
+        using var penShadow = new Pen(bottomShadow, thickness);
+        g.DrawLine(penShadow, rect.Right - 1, rect.Top, rect.Right - 1, rect.Bottom - 1);
+        g.DrawLine(penShadow, rect.Left, rect.Bottom - 1, rect.Right - 1, rect.Bottom - 1);
+    }
+
+    /// <summary>Cria a barra de topo arcade retrô (título pixelado + subtítulo).</summary>
+    public static Panel CreateHeaderBar(string title, string subtitle, int height = 68)
     {
         var panel = new Panel
         {
             Dock = DockStyle.Top,
             Height = height,
-            BackColor = SurfaceAlt,
-            Padding = new Padding(24, 10, 24, 10)
+            BackColor = Surface,
+            Padding = new Padding(0)
+        };
+
+        panel.Paint += (s, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+            using var penDark = new Pen(Border, 2);
+            e.Graphics.DrawLine(penDark, 0, panel.Height - 2, panel.Width, panel.Height - 2);
+            using var penLight = new Pen(BorderLight, 1);
+            e.Graphics.DrawLine(penLight, 0, panel.Height - 1, panel.Width, panel.Height - 1);
         };
 
         var accent = new Panel
         {
-            Dock = DockStyle.Left,
-            Width = 4,
-            BackColor = AccentPrimary
+            Location = new Point(0, 0),
+            Size = new Size(6, height),
+            BackColor = AccentPrimary,
+            Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left
         };
 
         var lblTitle = new Label
         {
             Text = title,
-            Font = FontHeadline(12.5f),
+            Font = FontHeadline(8.5f),
             ForeColor = TextPrimary,
-            AutoSize = true,
-            Location = new Point(24, string.IsNullOrEmpty(subtitle) ? (height - 20) / 2 : 12)
+            Location = new Point(16, 10),
+            Size = new Size(800, 24),
+            TextAlign = ContentAlignment.MiddleLeft,
+            BackColor = Color.Transparent
         };
 
-        panel.Controls.Add(lblTitle);
-
-        if (!string.IsNullOrEmpty(subtitle))
+        var lblSubtitle = new Label
         {
-            var lblSubtitle = new Label
-            {
-                Text = subtitle,
-                Font = FontCaption(9f),
-                ForeColor = TextSecondary,
-                AutoSize = true,
-                Location = new Point(24, 34)
-            };
-            panel.Controls.Add(lblSubtitle);
-        }
-
-        // Divisor sutil de 1px separando o header do conteúdo, no lugar de sombra pesada
-        // (consistente com o resto do design system, que usa bordas finas em vez de sombra).
-        var divider = new Panel
-        {
-            Dock = DockStyle.Bottom,
-            Height = 1,
-            BackColor = Border
+            Text = subtitle,
+            Font = FontCaption(8f),
+            ForeColor = TextSecondary,
+            Location = new Point(16, 36),
+            Size = new Size(800, 20),
+            TextAlign = ContentAlignment.MiddleLeft,
+            BackColor = Color.Transparent
         };
 
         panel.Controls.Add(accent);
-        panel.Controls.Add(divider);
+        panel.Controls.Add(lblTitle);
+        panel.Controls.Add(lblSubtitle);
         return panel;
     }
 
-    /// <summary>Aplica a aparência escura padrão a um TextBox (usar com BorderStyle.FixedSingle).</summary>
-    public static void StyleInput(TextBoxBase input)
+    /// <summary>Cria um painel de cartão com bordas chanfradas 8-bit.</summary>
+    public static RoundedPanel CreateCard()
     {
-        input.BackColor = SurfaceInput;
-        input.ForeColor = TextPrimary;
-        input.BorderStyle = BorderStyle.FixedSingle;
-        input.Font = FontBody();
-    }
-
-    public static void StyleListView(ListView listView)
-    {
-        listView.BackColor = SurfaceAlt;
-        listView.ForeColor = TextPrimary;
-        listView.BorderStyle = BorderStyle.FixedSingle;
-        listView.Font = FontBody();
-        listView.OwnerDraw = true;
-        listView.DrawColumnHeader += (s, e) =>
+        return new RoundedPanel
         {
-            using var bg = new SolidBrush(Surface);
-            e.Graphics.FillRectangle(bg, e.Bounds);
-            TextRenderer.DrawText(e.Graphics, e.Header?.Text, FontBodyBold(9f), e.Bounds, TextPrimary,
-                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding);
+            BackColor = SurfaceAlt,
+            BorderColor = BorderLight,
+            Padding = new Padding(12)
         };
-        listView.DrawItem += (s, e) => e.DrawDefault = true;
-        listView.DrawSubItem += (s, e) => e.DrawDefault = true;
     }
 
-    /// <summary>
-    /// Faz a última coluna de um ListView em modo Details preencher 100% da largura disponível
-    /// do controle, para que não sobre uma faixa de fundo branca (cor padrão do Windows) à
-    /// direita do cabeçalho quando a soma das larguras das colunas é menor que a largura real.
-    /// Reserva a largura de uma scrollbar vertical como margem de segurança, para nunca causar
-    /// scroll horizontal quando a lista ganha itens depois do redimensionamento.
-    /// </summary>
-    public static void FillLastColumn(ListView listView, int minWidth = 80)
+    /// <summary>Estiliza caixas de texto com moldura pixelada e fundo de terminal escuro.</summary>
+    public static void StyleInput(TextBox tb)
     {
-        void Resize()
-        {
-            if (listView.IsDisposed || listView.Columns.Count == 0) return;
-
-            var last = listView.Columns[listView.Columns.Count - 1];
-            var othersWidth = 0;
-            for (var i = 0; i < listView.Columns.Count - 1; i++)
-            {
-                othersWidth += listView.Columns[i].Width;
-            }
-
-            var available = listView.ClientSize.Width - othersWidth - SystemInformation.VerticalScrollBarWidth;
-            last.Width = Math.Max(minWidth, available);
-        }
-
-        listView.Resize += (_, _) => Resize();
-        Resize();
+        tb.BackColor = SurfaceInput;
+        tb.ForeColor = TextPrimary;
+        tb.BorderStyle = BorderStyle.FixedSingle;
+        tb.Font = FontBody(9f);
     }
 
-    /// <summary>Label de "estado vazio" centralizado, para painéis/listas sem conteúdo ainda.</summary>
+    public static void StyleInput(RichTextBox rtb)
+    {
+        rtb.BackColor = SurfaceInput;
+        rtb.ForeColor = TextPrimary;
+        rtb.BorderStyle = BorderStyle.FixedSingle;
+        rtb.Font = FontBody(9f);
+    }
+
+    /// <summary>Estiliza TabControl com abas em estilo 8-bit com realce neon.</summary>
+    public static void StyleTabControl(TabControl tc)
+    {
+        tc.DrawMode = TabDrawMode.OwnerDrawFixed;
+        tc.ItemSize = new Size(220, 34);
+        tc.SizeMode = TabSizeMode.Fixed;
+
+        tc.DrawItem += (s, e) =>
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.None;
+            var tabRect = tc.GetTabRect(e.Index);
+            var isSelected = tc.SelectedIndex == e.Index;
+
+            var bgCol = isSelected ? SurfaceAlt : Surface;
+            using var brush = new SolidBrush(bgCol);
+            g.FillRectangle(brush, tabRect);
+
+            // Borda pixel 8-bit
+            using var pen = new Pen(isSelected ? AccentPrimary : Border, 2);
+            g.DrawRectangle(pen, tabRect.X + 1, tabRect.Y + 1, tabRect.Width - 2, tabRect.Height - 2);
+
+            var text = tc.TabPages[e.Index].Text;
+            var textCol = isSelected ? AccentPrimary : TextSecondary;
+            var font = isSelected ? FontHeadline(7.5f) : FontBody(8f);
+
+            TextRenderer.DrawText(g, text, font, tabRect, textCol,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        };
+    }
+
+    /// <summary>Estiliza ListView para visual de tabela/inventário 8-bit.</summary>
+    public static void StyleListView(ListView lv)
+    {
+        lv.BackColor = SurfaceInput;
+        lv.ForeColor = TextPrimary;
+        lv.BorderStyle = BorderStyle.FixedSingle;
+        lv.Font = FontBody(8.5f);
+        lv.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+    }
+
+    /// <summary>Cria uma etiqueta de estado / badge em estilo pixel art.</summary>
+    public static Label CreateStatusBadge(string text, Color accent)
+    {
+        var lbl = new Label
+        {
+            Text = text,
+            Font = FontCaption(8f),
+            ForeColor = TextPrimary,
+            BackColor = Surface,
+            AutoSize = true,
+            Padding = new Padding(8, 4, 8, 4),
+            TextAlign = ContentAlignment.MiddleCenter
+        };
+
+        lbl.Paint += (s, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+            var r = new Rectangle(0, 0, lbl.Width - 1, lbl.Height - 1);
+            using var penAccent = new Pen(accent, 2);
+            e.Graphics.DrawRectangle(penAccent, r);
+        };
+
+        return lbl;
+    }
+
+    /// <summary>Cria uma mensagem de estado vazio para listas e painéis.</summary>
     public static Label CreateEmptyState(string text, Color? backColor = null)
     {
         return new Label
         {
-            Dock = DockStyle.Fill,
+            Text = text,
+            Font = FontCaption(8.5f),
+            ForeColor = TextSecondary,
             TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = TextDisabled,
-            BackColor = backColor ?? SurfaceAlt,
-            Font = FontBody(9.5f),
-            Padding = new Padding(24),
-            Text = text
+            Dock = DockStyle.Fill,
+            BackColor = backColor ?? SurfaceAlt
         };
     }
 
-    /// <summary>Painel "card" com fundo elevado e borda sutil de 1px, ao estilo do design system.</summary>
-    public static Panel CreateCard(int padding = 16)
+    public static void FillLastColumn(ListView lv, int minWidth = 100)
     {
-        return new RoundedPanel
+        lv.Resize += (_, _) =>
         {
-            BackColor = Surface,
-            Padding = new Padding(padding),
-            BorderColor = Border,
-            Radius = RadiusMedium
-        };
-    }
-
-    /// <summary>Aplica tema escuro a um TabControl via desenho customizado das abas.</summary>
-    public static void StyleTabControl(TabControl tabControl)
-    {
-        tabControl.DrawMode = TabDrawMode.OwnerDrawFixed;
-        tabControl.SizeMode = TabSizeMode.Normal;
-        tabControl.ItemSize = new Size(0, 32);
-        tabControl.Padding = new Point(16, 6);
-        tabControl.Font = FontBodyBold(9.5f);
-
-        tabControl.DrawItem += (s, e) =>
-        {
-            var tc = (TabControl)s!;
-            var tabRect = tc.GetTabRect(e.Index);
-            var selected = e.Index == tc.SelectedIndex;
-
-            using var bg = new SolidBrush(selected ? Surface : SurfaceAlt);
-            e.Graphics.FillRectangle(bg, tabRect);
-
-            if (selected)
+            if (lv.Columns.Count == 0) return;
+            var totalWidth = lv.ClientSize.Width;
+            for (var i = 0; i < lv.Columns.Count - 1; i++)
             {
-                using var accent = new SolidBrush(AccentPrimary);
-                e.Graphics.FillRectangle(accent, tabRect.X, tabRect.Bottom - 2, tabRect.Width, 2);
+                totalWidth -= lv.Columns[i].Width;
             }
-
-            TextRenderer.DrawText(e.Graphics, tc.TabPages[e.Index].Text, tc.Font, tabRect,
-                selected ? TextPrimary : TextSecondary,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            lv.Columns[^1].Width = Math.Max(minWidth, totalWidth);
         };
-
-        foreach (TabPage page in tabControl.TabPages)
-        {
-            page.BackColor = Surface;
-            page.ForeColor = TextPrimary;
-        }
     }
 
-    /// <summary>Badge/pill de status colorido (ex.: "Sincronizado", "Erro", "Pendente").</summary>
-    public static Label CreateStatusBadge(string text, Color color)
-    {
-        var badge = new Label
-        {
-            Text = "  " + text + "  ",
-            AutoSize = true,
-            Font = FontBodyBold(8.5f),
-            ForeColor = color,
-            BackColor = Color.FromArgb(38, color.R, color.G, color.B),
-            Padding = new Padding(2)
-        };
-        return badge;
-    }
+    #endregion
 }

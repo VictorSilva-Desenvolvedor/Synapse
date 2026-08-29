@@ -1,3 +1,4 @@
+using System.Drawing.Drawing2D;
 using Synapse.Conflict.Diff;
 using Synapse.Tray.UI;
 
@@ -27,17 +28,16 @@ public sealed class ThreeWayDiffViewerForm : Form
         // Deduz o caminho relativo original (ex: _conflitos/Notas/Diario.conflito-20260827.md -> Notas/Diario.md)
         _targetRelativePath = DeduceTargetRelativePath(vaultRootPath, conflictFilePath);
 
-        Text = $"Synapse — Resolução de Conflito: {_targetRelativePath}";
-        Size = new Size(1100, 720);
+        Text = $"Synapse — Resolução de Conflito [Pixel Edition]: {_targetRelativePath}";
+        Size = new Size(1140, 740);
         StartPosition = FormStartPosition.CenterScreen;
         SynapseTheme.ApplyFormChrome(this);
 
         // Header Panel
         var pnlHeader = SynapseTheme.CreateHeaderBar(
-            $"Resolução Visual de Conflito — {_targetRelativePath}",
-            "Selecione a resolução desejada para os blocos ou edite diretamente no painel de resultado final.",
-            60);
-        Controls.Add(pnlHeader);
+            $"► RESOLUÇÃO DE CONFLITO — {_targetRelativePath}",
+            "Selecione a resolução desejada para os blocos ou edite diretamente no painel final.",
+            70);
 
         // Main Table Layout (Top: 3 panels Side by Side; Bottom: Merged Result)
         var tableLayout = new TableLayoutPanel
@@ -55,69 +55,75 @@ public sealed class ThreeWayDiffViewerForm : Form
         tableLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34f));
 
         // 1. Local Panel
-        var pnlLocal = CreateTextPanel("Versão Local (Seu Cofre)", out _txtLocal, SynapseTheme.AccentPrimary);
+        var pnlLocal = CreateTextPanel("► VERSÃO LOCAL (SEU COFRE)", out _txtLocal, SynapseTheme.NeonGreen);
         tableLayout.Controls.Add(pnlLocal, 0, 0);
 
         // 2. Base Panel
-        var pnlBase = CreateTextPanel("Versão Base (Último Sync)", out _txtBase, SynapseTheme.BorderStrong);
+        var pnlBase = CreateTextPanel("► VERSÃO BASE (ÚLTIMO SYNC)", out _txtBase, SynapseTheme.TextSecondary);
         tableLayout.Controls.Add(pnlBase, 1, 0);
 
         // 3. Remote Panel
-        var pnlRemote = CreateTextPanel("Versão Remota (GitHub)", out _txtRemote, SynapseTheme.AccentSecondary);
+        var pnlRemote = CreateTextPanel("► VERSÃO REMOTA (GITHUB)", out _txtRemote, SynapseTheme.AccentPrimary);
         tableLayout.Controls.Add(pnlRemote, 2, 0);
 
         // 4. Result Preview Panel (spans all 3 columns)
-        var pnlResult = CreateTextPanel("Resultado Mesclado Final (editável)", out _txtMergedPreview, SynapseTheme.Warning, isReadOnly: false);
+        var pnlResult = CreateTextPanel("► RESULTADO MESCLADO FINAL (EDITÁVEL)", out _txtMergedPreview, SynapseTheme.Warning, isReadOnly: false);
         tableLayout.SetColumnSpan(pnlResult, 3);
         tableLayout.Controls.Add(pnlResult, 0, 1);
-
-        Controls.Add(tableLayout);
 
         // Footer Actions Panel
         var pnlFooter = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 55,
-            BackColor = SynapseTheme.SurfaceAlt,
-            Padding = new Padding(16, 10, 16, 10)
+            Height = 65,
+            BackColor = SynapseTheme.Surface,
+            Padding = new Padding(16, 12, 16, 12)
+        };
+        pnlFooter.Paint += (s, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+            using var penDark = new Pen(SynapseTheme.Border, 2);
+            e.Graphics.DrawLine(penDark, 0, 0, pnlFooter.Width, 0);
+            using var penLight = new Pen(SynapseTheme.BorderLight, 1);
+            e.Graphics.DrawLine(penLight, 0, 1, pnlFooter.Width, 1);
         };
 
         var btnAcceptLocal = new SynapseButton
         {
-            Text = "Aceitar Tudo Local",
-            Location = new Point(16, 10),
-            Width = 140,
-            Height = 32,
+            Text = "► Aceitar Local",
+            Location = new Point(16, 14),
+            Width = 150,
+            Height = 36,
             Variant = SynapseButtonVariant.Secondary
         };
         btnAcceptLocal.Click += (_, _) => AcceptAll(BlockResolutionChoice.Local);
 
         var btnAcceptRemote = new SynapseButton
         {
-            Text = "Aceitar Tudo Remoto",
-            Location = new Point(165, 10),
-            Width = 150,
-            Height = 32,
+            Text = "► Aceitar Remoto",
+            Location = new Point(175, 14),
+            Width = 160,
+            Height = 36,
             Variant = SynapseButtonVariant.Secondary
         };
         btnAcceptRemote.Click += (_, _) => AcceptAll(BlockResolutionChoice.Remote);
 
         var btnKeepBoth = new SynapseButton
         {
-            Text = "Manter Ambos",
-            Location = new Point(325, 10),
-            Width = 120,
-            Height = 32,
+            Text = "► Manter Ambos",
+            Location = new Point(345, 14),
+            Width = 150,
+            Height = 36,
             Variant = SynapseButtonVariant.Secondary
         };
         btnKeepBoth.Click += (_, _) => AcceptAll(BlockResolutionChoice.Both);
 
         var btnSaveAndResolve = new SynapseButton
         {
-            Text = "Salvar e Concluir Resolução",
-            Location = new Point(870, 10),
+            Text = "Salvar && Concluir",
+            Location = new Point(pnlFooter.Width - 220, 14),
             Width = 200,
-            Height = 35,
+            Height = 36,
             Variant = SynapseButtonVariant.Primary,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
@@ -127,6 +133,9 @@ public sealed class ThreeWayDiffViewerForm : Form
         pnlFooter.Controls.Add(btnAcceptRemote);
         pnlFooter.Controls.Add(btnKeepBoth);
         pnlFooter.Controls.Add(btnSaveAndResolve);
+
+        Controls.Add(tableLayout);
+        Controls.Add(pnlHeader);
         Controls.Add(pnlFooter);
 
         Shown += (_, _) => LoadDiffContents();
@@ -134,32 +143,41 @@ public sealed class ThreeWayDiffViewerForm : Form
 
     private static Panel CreateTextPanel(string title, out RichTextBox textBox, Color accentColor, bool isReadOnly = true)
     {
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(4), BackColor = SynapseTheme.Background };
-        var accentBar = new Panel { Dock = DockStyle.Top, Height = 3, BackColor = accentColor };
+        var panel = new RoundedPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(6),
+            BackColor = SynapseTheme.SurfaceAlt,
+            BorderColor = SynapseTheme.BorderLight
+        };
+
+        var headerPnl = new Panel { Dock = DockStyle.Top, Height = 26, BackColor = SynapseTheme.Surface };
+        var accentBar = new Panel { Dock = DockStyle.Left, Width = 4, BackColor = accentColor };
         var lbl = new Label
         {
             Text = title,
-            Font = SynapseTheme.FontBodyBold(9f),
-            ForeColor = SynapseTheme.TextSecondary,
-            Dock = DockStyle.Top,
-            Height = 24,
-            Padding = new Padding(0, 4, 0, 0)
+            Font = SynapseTheme.FontHeadline(7.5f),
+            ForeColor = SynapseTheme.TextPrimary,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Padding = new Padding(6, 0, 0, 0)
         };
+        headerPnl.Controls.Add(lbl);
+        headerPnl.Controls.Add(accentBar);
 
         textBox = new RichTextBox
         {
             Dock = DockStyle.Fill,
             ReadOnly = isReadOnly,
-            BackColor = SynapseTheme.SurfaceAlt,
+            BackColor = SynapseTheme.SurfaceInput,
             ForeColor = SynapseTheme.TextPrimary,
-            BorderStyle = BorderStyle.FixedSingle,
-            Font = SynapseTheme.FontMono(9.5f),
+            Font = SynapseTheme.FontMono(8.5f),
+            BorderStyle = BorderStyle.None,
             WordWrap = false
         };
 
         panel.Controls.Add(textBox);
-        panel.Controls.Add(lbl);
-        panel.Controls.Add(accentBar);
+        panel.Controls.Add(headerPnl);
         return panel;
     }
 

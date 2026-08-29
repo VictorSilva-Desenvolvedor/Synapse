@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Drawing.Drawing2D;
 using Synapse.Brain.Models;
 using Synapse.Brain.Ports;
 using Synapse.Brain.Providers;
@@ -25,8 +26,8 @@ public sealed class QuickCaptureForm : Form
     {
         _configManager = configManager ?? new SynapseConfigManager();
 
-        Text = "Synapse — Captura Rápida (Segundo Cérebro)";
-        Size = new Size(680, 500);
+        Text = "Synapse — Captura Rápida (Segundo Cérebro) [Pixel Edition]";
+        Size = new Size(720, 540);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -34,10 +35,9 @@ public sealed class QuickCaptureForm : Form
 
         // Header Panel
         var pnlHeader = SynapseTheme.CreateHeaderBar(
-            "🧠 Captura Inteligente para o Segundo Cérebro",
+            "► CAPTURA INTELIGENTE (BRAIN)",
             "Digite uma ideia, link ou anotação. A IA estrutura, adiciona tags e conecta com seu cofre.",
-            64);
-        Controls.Add(pnlHeader);
+            70);
 
         // Body Input Panel
         var pnlBody = new Panel
@@ -47,24 +47,36 @@ public sealed class QuickCaptureForm : Form
             BackColor = SynapseTheme.Background
         };
 
+        var cardInput = SynapseTheme.CreateCard();
+        cardInput.Dock = DockStyle.Fill;
+        cardInput.Padding = new Padding(8);
+
         _txtInput = new RichTextBox
         {
             Dock = DockStyle.Fill,
-            Font = new Font(SynapseTheme.FontFamily, 10.5f, FontStyle.Regular),
-            BackColor = SynapseTheme.SurfaceAlt,
+            Font = SynapseTheme.FontBody(9f),
+            BackColor = SynapseTheme.SurfaceInput,
             ForeColor = SynapseTheme.TextPrimary,
-            BorderStyle = BorderStyle.FixedSingle
+            BorderStyle = BorderStyle.None
         };
-        pnlBody.Controls.Add(_txtInput);
-        Controls.Add(pnlBody);
+        cardInput.Controls.Add(_txtInput);
+        pnlBody.Controls.Add(cardInput);
 
         // Footer Actions Panel
         var pnlFooter = new Panel
         {
             Dock = DockStyle.Bottom,
             Height = 90,
-            BackColor = SynapseTheme.SurfaceAlt,
+            BackColor = SynapseTheme.Surface,
             Padding = new Padding(16, 12, 16, 12)
+        };
+        pnlFooter.Paint += (s, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+            using var penDark = new Pen(SynapseTheme.Border, 2);
+            e.Graphics.DrawLine(penDark, 0, 0, pnlFooter.Width, 0);
+            using var penLight = new Pen(SynapseTheme.BorderLight, 1);
+            e.Graphics.DrawLine(penLight, 0, 1, pnlFooter.Width, 1);
         };
 
         var lblProvider = new Label
@@ -73,18 +85,18 @@ public sealed class QuickCaptureForm : Form
             Location = new Point(16, 16),
             AutoSize = true,
             ForeColor = SynapseTheme.TextSecondary,
-            Font = SynapseTheme.FontBodyBold(9f)
+            Font = SynapseTheme.FontHeadline(8f)
         };
 
         _cmbProvider = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(100, 12),
-            Width = 190,
+            Location = new Point(130, 12),
+            Width = 200,
             FlatStyle = FlatStyle.Flat,
             BackColor = SynapseTheme.SurfaceInput,
             ForeColor = SynapseTheme.TextPrimary,
-            Font = SynapseTheme.FontBody()
+            Font = SynapseTheme.FontBody(8.5f)
         };
         _cmbProvider.Items.Add("Google Gemini (Free Tier)");
         _cmbProvider.Items.Add("Ollama (Local Offline)");
@@ -92,9 +104,9 @@ public sealed class QuickCaptureForm : Form
 
         _lblStatus = new Label
         {
-            Text = "Pronto.",
-            ForeColor = SynapseTheme.TextSecondary,
-            Font = SynapseTheme.FontCaption(),
+            Text = "● Pronto para capturar.",
+            ForeColor = SynapseTheme.NeonGreen,
+            Font = SynapseTheme.FontCaption(8f),
             Location = new Point(16, 54),
             AutoSize = true
         };
@@ -102,8 +114,8 @@ public sealed class QuickCaptureForm : Form
         _btnSaveRaw = new SynapseButton
         {
             Text = "Salvar sem IA",
-            Location = new Point(370, 10),
-            Width = 110,
+            Location = new Point(345, 12),
+            Width = 140,
             Height = 36,
             Variant = SynapseButtonVariant.Secondary
         };
@@ -111,9 +123,9 @@ public sealed class QuickCaptureForm : Form
 
         _btnProcessAi = new SynapseButton
         {
-            Text = "Processar com IA & Salvar",
-            Location = new Point(490, 10),
-            Width = 180,
+            Text = "Processar com IA && Salvar",
+            Location = new Point(495, 12),
+            Width = 195,
             Height = 36,
             Variant = SynapseButtonVariant.Primary
         };
@@ -124,6 +136,9 @@ public sealed class QuickCaptureForm : Form
         pnlFooter.Controls.Add(_lblStatus);
         pnlFooter.Controls.Add(_btnSaveRaw);
         pnlFooter.Controls.Add(_btnProcessAi);
+
+        Controls.Add(pnlBody);
+        Controls.Add(pnlHeader);
         Controls.Add(pnlFooter);
     }
 

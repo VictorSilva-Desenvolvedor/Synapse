@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Synapse.Agent.Models;
+using Synapse.Core.Logging;
 using Synapse.Core.Ports;
 
 namespace Synapse.Agent;
@@ -92,6 +93,11 @@ public sealed class RemoteCommandPoller
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Erro no ciclo de verificação do RemoteCommandPoller.");
+            _ = SynapseActivityLogger.Instance.LogActionAsync(
+                "RemoteAgent",
+                "CheckCycleError",
+                status: "Failed",
+                errorMessage: ex.Message);
         }
     }
 
@@ -146,6 +152,12 @@ public sealed class RemoteCommandPoller
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Erro ao processar arquivo de comando remoto '{CloudPath}'", cloudPath);
+            _ = SynapseActivityLogger.Instance.LogActionAsync(
+                "RemoteAgent",
+                "ProcessCommandFileError",
+                details: cloudPath,
+                status: "Failed",
+                errorMessage: ex.Message);
         }
         finally
         {
@@ -192,12 +204,48 @@ public sealed class RemoteCommandPoller
         }
     }
 
+    /// <summary>
+    /// Loop de longa duração do poller. RunOnceAsync já engole exceções do próprio ciclo
+    /// de verificação, mas esse laço externo (incluindo a espera do PeriodicTimer) também
+    /// precisa ser resiliente: uma exceção não tratada aqui mataria a tarefa de polling
+    /// silenciosamente para sempre (ela roda "fire-and-forget"), e o Controle Remoto
+    /// pareceria "ativado" no menu sem nunca mais processar nada, sem nenhum erro visível.
+    /// </summary>
     public async Task RunAsync(CancellationToken ct)
     {
         using var timer = new PeriodicTimer(_interval, _timeProvider);
-        do
+
+        while (!ct.IsCancellationRequested)
         {
-            await RunOnceAsync(ct);
-        } while (!ct.IsCancellationRequested && await timer.WaitForNextTickAsync(ct));
+            try
+            {
+                await RunOnceAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Erro inesperado no loop do RemoteCommandPoller. Continuando no próximo ciclo.");
+                _ = SynapseActivityLogger.Instance.LogActionAsync(
+                    "RemoteAgent",
+                    "PollerLoopError",
+                    status: "Failed",
+                    errorMessage: ex.Message);
+            }
+
+            try
+            {
+                if (!await timer.WaitForNextTickAsync(ct))
+                {
+                    break;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+        }
     }
 }

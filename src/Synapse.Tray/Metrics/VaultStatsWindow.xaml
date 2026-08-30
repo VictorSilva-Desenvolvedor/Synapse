@@ -1,0 +1,180 @@
+<ui:PixelWindow x:Class="Synapse.Tray.Metrics.VaultStatsWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:ui="clr-namespace:Synapse.Tray.UI"
+                Title="ESTATISTICAS DO COFRE"
+                Subtitle="Volume de escrita, temas e backup."
+                Width="800"
+                Height="560">
+
+    <ui:PixelWindow.Resources>
+        <!-- Cartao de KPI: faixa de acento de 4px no topo, rotulo e valor -->
+        <Style x:Key="KpiCard" TargetType="Border" BasedOn="{StaticResource PixelCard}">
+            <Setter Property="Margin" Value="0,0,8,0"/>
+        </Style>
+    </ui:PixelWindow.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- KPIs -->
+        <UniformGrid Grid.Row="0" Rows="1" Columns="4" Margin="16,16,8,0">
+            <Border Style="{StaticResource KpiCard}">
+                <Border Style="{StaticResource PixelCardInner}">
+                    <StackPanel Margin="12">
+                        <Rectangle Height="4" Fill="{StaticResource SuccessBrush}" Margin="0,0,0,10" SnapsToDevicePixels="True"/>
+                        <TextBlock Text="TOTAL DE NOTAS" Style="{StaticResource PixelCaption}"/>
+                        <TextBlock x:Name="NotesValue" Text="-" Style="{StaticResource PixelHeadline}" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Border>
+            <Border Style="{StaticResource KpiCard}">
+                <Border Style="{StaticResource PixelCardInner}">
+                    <StackPanel Margin="12">
+                        <Rectangle Height="4" Fill="{StaticResource AccentSecondaryBrush}" Margin="0,0,0,10" SnapsToDevicePixels="True"/>
+                        <TextBlock Text="PALAVRAS" Style="{StaticResource PixelCaption}"/>
+                        <TextBlock x:Name="WordsValue" Text="-" Style="{StaticResource PixelHeadline}" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Border>
+            <Border Style="{StaticResource KpiCard}">
+                <Border Style="{StaticResource PixelCardInner}">
+                    <StackPanel Margin="12">
+                        <Rectangle Height="4" Fill="{StaticResource WarningBrush}" Margin="0,0,0,10" SnapsToDevicePixels="True"/>
+                        <TextBlock Text="LEITURA" Style="{StaticResource PixelCaption}"/>
+                        <TextBlock x:Name="ReadingValue" Text="-" Style="{StaticResource PixelHeadline}" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Border>
+            <Border Style="{StaticResource KpiCard}">
+                <Border Style="{StaticResource PixelCardInner}">
+                    <StackPanel Margin="12">
+                        <Rectangle Height="4" Fill="{StaticResource AccentPrimaryBrush}" Margin="0,0,0,10" SnapsToDevicePixels="True"/>
+                        <TextBlock Text="ATIVIDADE 7D" Style="{StaticResource PixelCaption}"/>
+                        <TextBlock x:Name="ActivityValue" Text="-" Style="{StaticResource PixelHeadline}" Margin="0,10,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Border>
+        </UniformGrid>
+
+        <TextBlock Grid.Row="1"
+                   Text="DISTRIBUICAO POR CATEGORIA"
+                   Style="{StaticResource PixelHeadline}"
+                   Foreground="{StaticResource AccentPrimaryBrush}"
+                   Margin="16,20,16,10"/>
+
+        <!-- ItemsControl, nao ListView+GridView: o GridView do WPF sempre reserva um
+             preenchedor depois da ultima coluna, que aparecia como uma coluna fantasma
+             vazia no cabecalho. Com grade propria o problema deixa de existir. -->
+        <Grid Grid.Row="2" Margin="16,0,16,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- CABECALHO -->
+            <Grid Grid.Row="0" Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="220"/>
+                    <ColumnDefinition Width="70"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="76"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="CATEGORIA" Style="{StaticResource PixelCaption}" FontSize="{StaticResource FontSizeSmall}"/>
+                <TextBlock Grid.Column="1" Text="NOTAS" Style="{StaticResource PixelCaption}" FontSize="{StaticResource FontSizeSmall}"
+                           TextAlignment="Right" Margin="0,0,12,0"/>
+                <TextBlock Grid.Column="2" Text="PROPORCAO" Style="{StaticResource PixelCaption}" FontSize="{StaticResource FontSizeSmall}"/>
+            </Grid>
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="CategoriesList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <!-- Sem faixa alternada: ItemsControl.AlternationIndex nao chega ao DataTemplate
+                                 aqui (verificado em captura), e as barras ja guiam o olho. -->
+                            <Border Padding="0,8,0,8" SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="220"/>
+                                        <ColumnDefinition Width="70"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="76"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Grid.Column="0"
+                                               Text="{Binding Category}"
+                                               FontSize="{StaticResource FontSizeBody}"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               Margin="8,0,8,0"/>
+
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding Count}"
+                                               FontSize="{StaticResource FontSizeBody}"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center"
+                                               TextAlignment="Right"
+                                               Margin="0,0,12,0"/>
+
+                                    <!-- Trilho + preenchimento proporcional + rotulo -->
+                                    <Grid Grid.Column="2" Height="16" VerticalAlignment="Center" Margin="0,0,8,0">
+                                        <Border Background="{StaticResource SurfaceInputBrush}"
+                                                BorderBrush="{StaticResource EdgeBrush}"
+                                                BorderThickness="2,2,0,0"
+                                                SnapsToDevicePixels="True"/>
+                                        <Grid Margin="2,2,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="{Binding BarFilled}"/>
+                                                <ColumnDefinition Width="{Binding BarRest}"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Rectangle Grid.Column="0"
+                                                       Fill="{StaticResource AccentPrimaryBrush}"
+                                                       SnapsToDevicePixels="True"/>
+                                        </Grid>
+                                    </Grid>
+
+                                    <!-- A porcentagem sai da barra: sobre o preenchimento
+                                         ela ficava ilegivel nas categorias grandes. -->
+                                    <TextBlock Grid.Column="3"
+                                               Text="{Binding Share}"
+                                               FontSize="{StaticResource FontSizeSmall}"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               TextAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- RODAPE -->
+        <Border Grid.Row="3"
+                Margin="0,16,0,0"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource EdgeBrush}"
+                BorderThickness="0,2,0,0"
+                SnapsToDevicePixels="True">
+            <Grid Margin="16,12,16,12">
+                <Button x:Name="RefreshButton"
+                        Content="ATUALIZAR"
+                        MinWidth="160"
+                        HorizontalAlignment="Left"
+                        Click="OnRefresh"/>
+                <Button x:Name="ExportButton"
+                        Content="EXPORTAR BACKUP (.ENC)"
+                        MinWidth="280"
+                        HorizontalAlignment="Right"
+                        Style="{StaticResource PixelButtonPrimary}"
+                        Click="OnExportBackup"/>
+            </Grid>
+        </Border>
+    </Grid>
+</ui:PixelWindow>

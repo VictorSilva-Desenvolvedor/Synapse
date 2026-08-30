@@ -93,6 +93,34 @@ public class RemoteCommandExecutorTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_OpenApp_WhenNaturalLanguagePhraseGiven_ShouldResolveAllowedAppKey()
+    {
+        var config = new SynapseConfig
+        {
+            RemoteControlEnabled = true,
+            VaultPath = _tempVaultDir,
+            RemoteAllowedApps = new Dictionary<string, string>
+            {
+                ["calc"] = "calc.exe"
+            }
+        };
+
+        var executor = new RemoteCommandExecutor(config);
+        var command = new RemoteCommand(
+            Id: Guid.NewGuid(),
+            CreatedAt: DateTimeOffset.UtcNow,
+            Type: RemoteCommandType.OpenApp,
+            Payload: new Dictionary<string, string> { ["app"] = "abre o calc por favor" },
+            RequestedBy: "mobile-user");
+
+        var result = await executor.ExecuteAsync(command);
+
+        // Como calc.exe é um executável de sistema do Windows, a execução terá sucesso
+        result.Status.ShouldBe(RemoteCommandStatus.Success);
+        result.Message.ShouldContain("calc");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_OpenNote_WhenPathTraversalAttempted_ShouldReject()
     {
         var config = new SynapseConfig

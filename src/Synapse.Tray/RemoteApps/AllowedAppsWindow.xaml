@@ -1,0 +1,188 @@
+<ui:PixelWindow x:Class="Synapse.Tray.RemoteApps.AllowedAppsWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="clr-namespace:Synapse.Tray.UI"
+                 Title="APPS PERMITIDOS"
+                 Subtitle="Gerencie os aplicativos liberados para abertura remota."
+                 Width="880"
+                 Height="620"
+                 WindowStartupLocation="CenterScreen">
+
+    <ui:PixelWindow.Resources>
+        <Style x:Key="AppCard" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="CornerRadius" Value="0"/>
+            <Setter Property="Padding" Value="12,8,12,8"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+
+        <Style x:Key="BadgeKey" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource SurfaceInputBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="6,2,6,2"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+    </ui:PixelWindow.Resources>
+
+    <Grid Margin="16">
+        <TabControl x:Name="MainTabControl">
+            <!-- ABA 1: APPS APROVADOS -->
+            <TabItem Header="APPS APROVADOS">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Cabeçalho de Status -->
+                    <Grid Grid.Row="0" Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ApprovedCountText"
+                                   Grid.Column="0"
+                                   Text="CONFIGURADOS: 0"
+                                   Style="{StaticResource PixelHeadline}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1"
+                                   Text="Apenas estes comandos podem ser executados remotamente"
+                                   Style="{StaticResource PixelCaption}"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   Margin="12,0,0,0"/>
+                    </Grid>
+
+                    <!-- Lista de Apps Aprovados -->
+                    <Border Grid.Row="1"
+                            Background="{StaticResource SurfaceInputBrush}"
+                            BorderBrush="{StaticResource EdgeBrush}"
+                            BorderThickness="2"
+                            Margin="0,0,0,12"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8">
+                            <StackPanel x:Name="ApprovedListPanel"/>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- Adicionar Manualmente -->
+                    <Border Grid.Row="2"
+                            Background="{StaticResource SurfaceBrush}"
+                            BorderBrush="{StaticResource EdgeLightBrush}"
+                            BorderThickness="2"
+                            Padding="12"
+                            SnapsToDevicePixels="True">
+                        <StackPanel>
+                            <TextBlock Text="ADICIONAR MANUALMENTE"
+                                       Style="{StaticResource PixelHeadline}"
+                                       FontSize="{StaticResource FontSizeSmall}"
+                                       Foreground="{StaticResource AccentPrimaryBrush}"
+                                       Margin="0,0,0,8"/>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="180"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <TextBox x:Name="ManualKeyBox"
+                                         Grid.Column="0"
+                                         ui:Pixel.Watermark="Chave (ex: notepad)"
+                                         Height="32"/>
+
+                                <TextBox x:Name="ManualPathBox"
+                                         Grid.Column="2"
+                                         ui:Pixel.Watermark="Caminho do executável ou comando"
+                                         Height="32"/>
+
+                                <Button x:Name="BrowseButton"
+                                        Grid.Column="4"
+                                        Content="PROCURAR..."
+                                        Height="32"
+                                        Padding="10,0"
+                                        Click="OnBrowseExecutable"/>
+
+                                <Button x:Name="AddManualButton"
+                                        Grid.Column="6"
+                                        Content="ADICIONAR"
+                                        Style="{StaticResource PixelButtonPrimary}"
+                                        Height="32"
+                                        Padding="14,0"
+                                        Click="OnAddManualApp"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <!-- ABA 2: DESCOBRIR ATALHOS DO MENU INICIAR -->
+            <TabItem Header="DESCOBRIR ATALHOS">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Barra de Busca -->
+                    <Grid Grid.Row="0" Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Text="FILTRAR:"
+                                   Style="{StaticResource PixelHeadline}"
+                                   FontSize="{StaticResource FontSizeSmall}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,10,0"/>
+
+                        <TextBox x:Name="SearchBox"
+                                 Grid.Column="1"
+                                 ui:Pixel.Watermark="Digite o nome do aplicativo..."
+                                 Height="32"
+                                 TextChanged="OnSearchTextChanged"/>
+
+                        <Button Grid.Column="2"
+                                Content="RECARREGAR"
+                                Margin="10,0,0,0"
+                                Height="32"
+                                Padding="12,0"
+                                Click="OnRefreshShortcuts"/>
+                    </Grid>
+
+                    <!-- Lista de Atalhos Descobertos -->
+                    <Border Grid.Row="1"
+                            Background="{StaticResource SurfaceInputBrush}"
+                            BorderBrush="{StaticResource EdgeBrush}"
+                            BorderThickness="2"
+                            Margin="0,0,0,8"
+                            SnapsToDevicePixels="True">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8">
+                            <StackPanel x:Name="DiscoveredListPanel"/>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- Rodapé informativo -->
+                    <TextBlock Grid.Row="2"
+                               x:Name="DiscoveredCountText"
+                               Text="0 atalhos encontrados no Menu Iniciar"
+                               Style="{StaticResource PixelCaption}"
+                               Foreground="{StaticResource TextSecondaryBrush}"/>
+                </Grid>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</ui:PixelWindow>

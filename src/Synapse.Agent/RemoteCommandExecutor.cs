@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Extensions.Logging;
 using Synapse.Agent.Models;
 using Synapse.Brain.Ports;
@@ -13,7 +15,7 @@ namespace Synapse.Agent;
 /// </summary>
 public sealed class RemoteCommandExecutor
 {
-    private readonly Func<SynapseConfig> _configProvider;
+    private readonly Func<Task<SynapseConfig>> _configProvider;
     private readonly IRemoteConfirmationPrompt? _confirmationPrompt;
     private readonly IUiAutomationAdapter? _uiAutomation;
     private readonly IVaultBrainQuery? _brainQuery;
@@ -27,12 +29,20 @@ public sealed class RemoteCommandExecutor
         IVaultBrainQuery? brainQuery = null,
         RemoteAuditLog? auditLog = null,
         ILogger<RemoteCommandExecutor>? logger = null)
-        : this(() => config, confirmationPrompt, uiAutomation, brainQuery, auditLog, logger)
+        : this(() => Task.FromResult(config), confirmationPrompt, uiAutomation, brainQuery, auditLog, logger)
     {
     }
 
+    /// <summary>
+    /// configProvider e assincrono de proposito: um Func&lt;SynapseConfig&gt; sincrono forcaria
+    /// o chamador a bloquear com GetAwaiter().GetResult() para ler config de disco, o que
+    /// trava para sempre quando esse bloqueio acontece na thread de UI do WPF (nenhum
+    /// ConfigureAwait(false) e usado neste codebase, entao a continuacao do LoadAsync()
+    /// tentaria voltar pra mesma thread ja bloqueada). Foi exatamente essa combinacao que
+    /// derrubou o RemoteCommandPoller silenciosamente ao processar o primeiro comando real.
+    /// </summary>
     public RemoteCommandExecutor(
-        Func<SynapseConfig> configProvider,
+        Func<Task<SynapseConfig>> configProvider,
         IRemoteConfirmationPrompt? confirmationPrompt = null,
         IUiAutomationAdapter? uiAutomation = null,
         IVaultBrainQuery? brainQuery = null,
@@ -51,7 +61,7 @@ public sealed class RemoteCommandExecutor
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        var config = _configProvider();
+        var config = await _configProvider();
 
         // 1. Verificação global do interruptor de segurança
         if (!config.RemoteControlEnabled)
@@ -92,9 +102,21 @@ public sealed class RemoteCommandExecutor
         }
     }
 
+    private static readonly HashSet<string> FillerWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "abre", "abra", "abrir", "abrindo",
+        "open", "launch",
+        "inicia", "iniciar",
+        "executa", "executar", "execute",
+        "por", "favor",
+        "o", "a", "os", "as",
+        "aplicativo", "aplicativos", "app", "apps",
+        "programa", "programas"
+    };
+
     private RemoteCommandResult ExecuteOpenApp(RemoteCommand command, SynapseConfig config)
     {
-        if (command.Payload == null || !command.Payload.TryGetValue("app", out var appKey) || string.IsNullOrWhiteSpace(appKey))
+        if (command.Payload == null || !command.Payload.TryGetValue("app", out var rawAppKey) || string.IsNullOrWhiteSpace(rawAppKey))
         {
             return new RemoteCommandResult(
                 command.Id,
@@ -103,46 +125,233 @@ public sealed class RemoteCommandExecutor
                 "Parâmetro 'app' não informado no payload.");
         }
 
-        // Valida chave simbólica contra a Allowlist configurada (case-insensitive)
-        var allowedMatch = config.RemoteAllowedApps
-            .FirstOrDefault(kvp => string.Equals(kvp.Key, appKey.Trim(), StringComparison.OrdinalIgnoreCase));
+        var matchedKey = ResolveAllowedAppKey(rawAppKey, config.RemoteAllowedApps);
 
-        if (string.IsNullOrWhiteSpace(allowedMatch.Key) || string.IsNullOrWhiteSpace(allowedMatch.Value))
+        if (matchedKey is null || !config.RemoteAllowedApps.TryGetValue(matchedKey, out var appPath) || string.IsNullOrWhiteSpace(appPath))
         {
-            _logger?.LogWarning("Tentativa de abrir aplicativo não permitido: '{AppKey}'", appKey);
+            _logger?.LogWarning("Tentativa de abrir aplicativo não permitido: '{AppKey}'", rawAppKey);
             return new RemoteCommandResult(
                 command.Id,
                 DateTimeOffset.UtcNow,
                 RemoteCommandStatus.Rejected,
-                $"Aplicativo '{appKey}' não está na lista de aplicativos permitidos (RemoteAllowedApps).");
+                $"Aplicativo '{rawAppKey}' não está na lista de aplicativos permitidos (RemoteAllowedApps).");
         }
 
         try
         {
             var psi = new ProcessStartInfo
             {
-                FileName = allowedMatch.Value,
+                FileName = appPath,
                 UseShellExecute = true
             };
 
             Process.Start(psi);
-            _logger?.LogInformation("Aplicativo '{AppKey}' ({Path}) iniciado com sucesso via comando remoto {CommandId}.", appKey, allowedMatch.Value, command.Id);
+            _logger?.LogInformation("Aplicativo '{AppKey}' ({Path}) iniciado com sucesso via comando remoto {CommandId}.", matchedKey, appPath, command.Id);
 
             return new RemoteCommandResult(
                 command.Id,
                 DateTimeOffset.UtcNow,
                 RemoteCommandStatus.Success,
-                $"Aplicativo '{appKey}' iniciado com sucesso.");
+                $"Aplicativo '{matchedKey}' iniciado com sucesso.");
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Falha ao iniciar processo '{Path}' para o app '{AppKey}'", allowedMatch.Value, appKey);
+            _logger?.LogError(ex, "Falha ao iniciar processo '{Path}' para o app '{AppKey}'", appPath, matchedKey);
             return new RemoteCommandResult(
                 command.Id,
                 DateTimeOffset.UtcNow,
                 RemoteCommandStatus.Failed,
-                $"Falha ao iniciar aplicativo '{appKey}': {ex.Message}");
+                $"Falha ao iniciar aplicativo '{matchedKey}': {ex.Message}");
         }
+    }
+
+    internal static string? ResolveAllowedAppKey(string rawInput, IReadOnlyDictionary<string, string> allowedApps)
+    {
+        if (allowedApps == null || allowedApps.Count == 0 || string.IsNullOrWhiteSpace(rawInput))
+        {
+            return null;
+        }
+
+        var trimmedInput = rawInput.Trim();
+
+        // 1. Match exato de chave (case-insensitive)
+        foreach (var key in allowedApps.Keys)
+        {
+            if (string.Equals(key.Trim(), trimmedInput, StringComparison.OrdinalIgnoreCase))
+            {
+                return key;
+            }
+        }
+
+        // 2. Normalizar rawInput: minúsculas, sem acentos, sem pontuação, colapsar espaços
+        var normalizedInput = NormalizeText(trimmedInput);
+        if (string.IsNullOrWhiteSpace(normalizedInput))
+        {
+            return null;
+        }
+
+        // 3. Remover palavras de preenchimento comuns (pt/en) quando aparecerem como palavra inteira
+        var inputWords = normalizedInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var filteredWords = inputWords.Where(w => !FillerWords.Contains(w)).ToArray();
+        var cleanedInput = filteredWords.Length > 0
+            ? string.Join(" ", filteredWords)
+            : normalizedInput;
+
+        if (string.IsNullOrWhiteSpace(cleanedInput))
+        {
+            cleanedInput = normalizedInput;
+        }
+
+        // 4. Mapear cada entrada da allowlist
+        var candidates = new List<(string Key, string NormalizedKey, string? NormalizedDisplayName)>();
+        foreach (var (key, value) in allowedApps)
+        {
+            if (string.IsNullOrWhiteSpace(key)) continue;
+
+            var normKey = NormalizeText(key);
+            string? normDisplayName = null;
+
+            if (!string.IsNullOrWhiteSpace(value) && !value.Contains("://", StringComparison.Ordinal))
+            {
+                try
+                {
+                    var fileNameWithoutExt = Path.GetFileNameWithoutExtension(value.Trim());
+                    if (!string.IsNullOrWhiteSpace(fileNameWithoutExt))
+                    {
+                        normDisplayName = NormalizeText(fileNameWithoutExt);
+                    }
+                }
+                catch
+                {
+                    // Ignora nome de exibição caso o caminho contenha caracteres inválidos
+                }
+            }
+
+            candidates.Add((key, normKey, normDisplayName));
+        }
+
+        // 5. Ordem de precedência:
+        // Nível a: entrada limpa == chave normalizada
+        var matchesA = candidates
+            .Where(c => !string.IsNullOrEmpty(c.NormalizedKey) && string.Equals(cleanedInput, c.NormalizedKey, StringComparison.Ordinal))
+            .Select(c => c.Key)
+            .Distinct()
+            .ToList();
+
+        if (matchesA.Count == 1) return matchesA[0];
+        if (matchesA.Count > 1) return null; // Ambiguidade
+
+        // Nível b: entrada limpa == nome de exibição normalizado
+        var matchesB = candidates
+            .Where(c => !string.IsNullOrEmpty(c.NormalizedDisplayName) && string.Equals(cleanedInput, c.NormalizedDisplayName, StringComparison.Ordinal))
+            .Select(c => c.Key)
+            .Distinct()
+            .ToList();
+
+        if (matchesB.Count == 1) return matchesB[0];
+        if (matchesB.Count > 1) return null;
+
+        // Nível c: substring nos dois sentidos (mín. 3 caracteres no lado mais curto) contra a chave normalizada
+        var matchesC = candidates
+            .Where(c => !string.IsNullOrEmpty(c.NormalizedKey)
+                && Math.Min(cleanedInput.Length, c.NormalizedKey.Length) >= 3
+                && (c.NormalizedKey.Contains(cleanedInput, StringComparison.Ordinal) || cleanedInput.Contains(c.NormalizedKey, StringComparison.Ordinal)))
+            .Select(c => c.Key)
+            .Distinct()
+            .ToList();
+
+        if (matchesC.Count == 1) return matchesC[0];
+        if (matchesC.Count > 1) return null;
+
+        // Nível d: mesmo teste de substring contra o nome de exibição normalizado
+        var matchesD = candidates
+            .Where(c => !string.IsNullOrEmpty(c.NormalizedDisplayName)
+                && Math.Min(cleanedInput.Length, c.NormalizedDisplayName!.Length) >= 3
+                && (c.NormalizedDisplayName.Contains(cleanedInput, StringComparison.Ordinal) || cleanedInput.Contains(c.NormalizedDisplayName, StringComparison.Ordinal)))
+            .Select(c => c.Key)
+            .Distinct()
+            .ToList();
+
+        if (matchesD.Count == 1) return matchesD[0];
+        if (matchesD.Count > 1) return null;
+
+        // Nível e: distância de Levenshtein contra a chave normalizada
+        var matchesE = candidates
+            .Where(c =>
+            {
+                if (string.IsNullOrEmpty(c.NormalizedKey)) return false;
+                var maxDist = c.NormalizedKey.Length < 5 ? 1 : 2;
+                var dist = LevenshteinDistance(cleanedInput, c.NormalizedKey);
+                return dist <= maxDist;
+            })
+            .Select(c => c.Key)
+            .Distinct()
+            .ToList();
+
+        if (matchesE.Count == 1) return matchesE[0];
+        if (matchesE.Count > 1) return null;
+
+        return null;
+    }
+
+    private static string NormalizeText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+
+        var unaccented = RemoveAccents(text.ToLowerInvariant());
+        var sb = new StringBuilder(unaccented.Length);
+        foreach (var c in unaccented)
+        {
+            if (char.IsLetterOrDigit(c) || char.IsWhiteSpace(c))
+            {
+                sb.Append(c);
+            }
+            else
+            {
+                sb.Append(' ');
+            }
+        }
+
+        return string.Join(" ", sb.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim();
+    }
+
+    private static string RemoveAccents(string text)
+    {
+        var normalized = text.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(normalized.Length);
+        foreach (var c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    private static int LevenshteinDistance(string s, string t)
+    {
+        if (string.Equals(s, t, StringComparison.Ordinal)) return 0;
+        if (s.Length == 0) return t.Length;
+        if (t.Length == 0) return s.Length;
+
+        var d = new int[s.Length + 1, t.Length + 1];
+
+        for (var i = 0; i <= s.Length; i++) d[i, 0] = i;
+        for (var j = 0; j <= t.Length; j++) d[0, j] = j;
+
+        for (var i = 1; i <= s.Length; i++)
+        {
+            for (var j = 1; j <= t.Length; j++)
+            {
+                var cost = (s[i - 1] == t[j - 1]) ? 0 : 1;
+                d[i, j] = Math.Min(
+                    Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                    d[i - 1, j - 1] + cost);
+            }
+        }
+
+        return d[s.Length, t.Length];
     }
 
     private RemoteCommandResult ExecuteOpenNote(RemoteCommand command, SynapseConfig config)

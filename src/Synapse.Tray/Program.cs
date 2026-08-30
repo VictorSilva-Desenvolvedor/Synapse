@@ -1,9 +1,10 @@
+using System.Windows;
+using Synapse.Tray.UI;
+
 namespace Synapse.Tray;
 
 internal static class Program
 {
-    private const string MutexName = "Local\\Synapse.Tray.Mutex.SingleInstance";
-
     [STAThread]
     private static void Main()
     {
@@ -12,40 +13,53 @@ internal static class Program
         var logFile = Path.Combine(logDir, "tray_startup.log");
         File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] Main starting...\n");
 
+        SynapseTrayApp? tray = null;
+
         try
         {
-            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-            Application.ThreadException += (_, e) =>
-            {
-                File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] ThreadException: {e.Exception}\n");
-            };
             AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             {
                 File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] Domain UnhandledException: {e.ExceptionObject}\n");
             };
 
-            ApplicationConfiguration.Initialize();
-            File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] ApplicationConfiguration initialized\n");
-
             using var mutex = new Mutex(true, "Local\\Synapse.Tray.Mutex.App", out var createdNew);
             File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] Mutex createdNew={createdNew}\n");
-            if (!createdNew)
+
+            if (!createdNew && !mutex.WaitOne(TimeSpan.FromMilliseconds(500), false))
             {
-                if (!mutex.WaitOne(TimeSpan.FromMilliseconds(500), false))
-                {
-                    File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] Mutex wait failed (already running)\n");
-                    return;
-                }
+                File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] Mutex wait failed (already running)\n");
+                return;
             }
 
-            File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] Running TrayApplicationContext...\n");
-            Application.Run(new TrayApplicationContext());
+            // Aplicacao WPF sem janela principal: a bandeja e que decide o ciclo de vida,
+            // entao o shutdown precisa ser explicito - caso contrario o app encerraria
+            // assim que a ultima janela fosse fechada.
+            var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+
+            app.DispatcherUnhandledException += (_, e) =>
+            {
+                File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] DispatcherUnhandledException: {e.Exception}\n");
+                e.Handled = true;
+            };
+
+            PixelWindow.EnsureTheme();
+            File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] Tema pixel art carregado\n");
+
+            tray = new SynapseTrayApp();
+            File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] Bandeja iniciada, entrando no loop...\n");
+
+            app.Run();
             File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] Application.Run finished cleanly\n");
         }
         catch (Exception ex)
         {
             File.AppendAllText(logFile, $"[{DateTime.UtcNow:o}] FATAL EXCEPTION: {ex}\n");
-            MessageBox.Show($"Erro crítico ao iniciar Synapse.Tray:\n{ex}", "Synapse - Erro Crítico", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show($"Erro critico ao iniciar Synapse.Tray:\n{ex}", "Synapse - Erro Critico",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            tray?.Dispose();
         }
     }
 }

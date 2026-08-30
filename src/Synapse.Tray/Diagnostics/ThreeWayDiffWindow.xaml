@@ -1,0 +1,116 @@
+<ui:PixelWindow x:Class="Synapse.Tray.Diagnostics.ThreeWayDiffWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:ui="clr-namespace:Synapse.Tray.UI"
+                Title="RESOLUCAO DE CONFLITO"
+                Width="1180"
+                Height="760">
+
+    <ui:PixelWindow.Resources>
+        <!-- Painel de versao: titulo com cor de papel + area de texto monoespacada -->
+        <Style x:Key="PaneTitle" TargetType="TextBlock" BasedOn="{StaticResource PixelHeadline}">
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+        <Style x:Key="PaneBox" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource SurfaceInputBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="CornerRadius" Value="0"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+    </ui:PixelWindow.Resources>
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="TargetPathText"
+                   Grid.Row="0"
+                   Style="{StaticResource PixelCaption}"
+                   Margin="0,0,0,10"
+                   TextTrimming="CharacterEllipsis"/>
+
+        <!-- TRES VERSOES LADO A LADO -->
+        <UniformGrid Grid.Row="1" Rows="1" Columns="3">
+            <Grid Margin="0,0,6,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="LOCAL (SEU COFRE)"
+                           Style="{StaticResource PaneTitle}"
+                           Foreground="{StaticResource SuccessBrush}"/>
+                <Border Grid.Row="1" Style="{StaticResource PaneBox}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Padding="8">
+                        <TextBlock x:Name="LocalText" Style="{StaticResource PixelMono}" LineHeight="18" TextWrapping="NoWrap"/>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+
+            <Grid Margin="6,0,6,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="BaseTitle" Grid.Row="0" Text="BASE (ULTIMO SYNC)"
+                           Style="{StaticResource PaneTitle}"
+                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                <Border Grid.Row="1" Style="{StaticResource PaneBox}">
+                    <ScrollViewer x:Name="BaseScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Padding="8">
+                        <TextBlock x:Name="BaseText" Style="{StaticResource PixelMono}" LineHeight="18" TextWrapping="Wrap"/>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+
+            <Grid Margin="6,0,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="REMOTA (GITHUB)"
+                           Style="{StaticResource PaneTitle}"
+                           Foreground="{StaticResource AccentPrimaryBrush}"/>
+                <Border Grid.Row="1" Style="{StaticResource PaneBox}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Padding="8">
+                        <TextBlock x:Name="RemoteText" Style="{StaticResource PixelMono}" LineHeight="18" TextWrapping="NoWrap"/>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+        </UniformGrid>
+
+        <TextBlock Grid.Row="2"
+                   Text="RESULTADO MESCLADO (EDITAVEL)"
+                   Style="{StaticResource PixelHeadline}"
+                   Foreground="{StaticResource WarningBrush}"
+                   Margin="0,16,0,8"/>
+
+        <TextBox x:Name="MergedBox"
+                 Grid.Row="3"
+                 AcceptsReturn="True"
+                 TextWrapping="NoWrap"
+                 VerticalContentAlignment="Top"
+                 VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Auto"
+                 FontFamily="{StaticResource FontMono}"
+                 FontSize="{StaticResource FontSizeMono}"/>
+
+        <!-- ACOES -->
+        <Grid Grid.Row="4" Margin="0,12,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                <Button Content="ACEITAR LOCAL" MinWidth="200" Margin="0,0,8,0" Click="OnAcceptLocal"/>
+                <Button Content="ACEITAR REMOTO" MinWidth="220" Margin="0,0,8,0" Click="OnAcceptRemote"/>
+                <Button Content="MANTER AMBOS" MinWidth="200" Click="OnKeepBoth"/>
+            </StackPanel>
+            <Button Content="SALVAR E CONCLUIR"
+                    MinWidth="250"
+                    HorizontalAlignment="Right"
+                    Style="{StaticResource PixelButtonPrimary}"
+                    Click="OnSave"/>
+        </Grid>
+    </Grid>
+</ui:PixelWindow>

@@ -1,0 +1,122 @@
+<ui:PixelWindow x:Class="Synapse.Tray.Diagnostics.DiagnosticsWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:ui="clr-namespace:Synapse.Tray.UI"
+                Title="DIAGNOSTICO"
+                Subtitle="Estado da sincronia e log do servico."
+                Width="900"
+                Height="620">
+
+    <ui:PixelWindow.Resources>
+
+        <!-- Uma linha de log. A cor vem da severidade extraida em LogLine.Parse. -->
+        <DataTemplate x:Key="LogLineTemplate">
+            <TextBlock x:Name="Line"
+                       Text="{Binding Text}"
+                       FontFamily="{StaticResource FontMono}"
+                       FontSize="{StaticResource FontSizeMono}"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       TextWrapping="NoWrap"
+                       LineHeight="19"/>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Level}" Value="WRN">
+                    <Setter TargetName="Line" Property="Foreground" Value="{StaticResource WarningBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="ERR">
+                    <Setter TargetName="Line" Property="Foreground" Value="{StaticResource ErrorBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="FTL">
+                    <Setter TargetName="Line" Property="Foreground" Value="{StaticResource ErrorBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="DBG">
+                    <Setter TargetName="Line" Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="VRB">
+                    <Setter TargetName="Line" Property="Foreground" Value="{StaticResource TextDisabledBrush}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+    </ui:PixelWindow.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- AVISO DE ESTADO
+             Responde "esta tudo bem?" sem exigir clique nem troca de aba. Encolhe para
+             uma linha verde quando nao ha conflito. -->
+        <Border Grid.Row="0"
+                Background="{StaticResource SurfaceAltBrush}"
+                Margin="16,16,16,0"
+                SnapsToDevicePixels="True">
+            <DockPanel>
+                <Rectangle x:Name="StateStripe"
+                           DockPanel.Dock="Left"
+                           Width="6"
+                           Fill="{StaticResource SuccessBrush}"
+                           SnapsToDevicePixels="True"/>
+
+                <Button x:Name="ResolveButton"
+                        DockPanel.Dock="Right"
+                        Content="RESOLVER"
+                        MinWidth="170"
+                        Margin="12"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed"
+                        Style="{StaticResource PixelButtonPrimary}"
+                        Click="OnResolveConflicts"/>
+
+                <StackPanel Margin="14,12,12,12" VerticalAlignment="Center">
+                    <TextBlock x:Name="StateText"
+                               Text="VERIFICANDO..."
+                               Style="{StaticResource PixelHeadline}"
+                               FontSize="{StaticResource FontSizeBody}"
+                               Foreground="{StaticResource SuccessBrush}"/>
+                    <TextBlock x:Name="StateDetail"
+                               Text="-"
+                               Style="{StaticResource PixelCaption}"
+                               Margin="0,8,0,0"
+                               TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- LOG — ocupa o resto da janela, sem abas competindo -->
+        <Border Grid.Row="1"
+                Margin="16,12,16,0"
+                Background="{StaticResource SurfaceInputBrush}"
+                BorderBrush="{StaticResource EdgeBrush}"
+                BorderThickness="2"
+                CornerRadius="0"
+                SnapsToDevicePixels="True">
+            <ScrollViewer x:Name="LogScroll"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Auto"
+                          Padding="10">
+                <ItemsControl x:Name="LogList" ItemTemplate="{StaticResource LogLineTemplate}"/>
+            </ScrollViewer>
+        </Border>
+
+        <!-- ACOES -->
+        <Grid Grid.Row="2" Margin="16,12,16,16">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="COPIAR LOG" MinWidth="170" Margin="0,0,8,0" Click="OnCopyLogs"/>
+                <Button Content="ABRIR ARQUIVO" MinWidth="190" Margin="0,0,8,0" Click="OnOpenLogFile"/>
+                <!-- Underscore duplicado: no WPF um "_" solto no Content vira marcador de tecla
+                     de acesso e some da tela. -->
+                <Button Content="ABRIR __CONFLITOS/" MinWidth="230" Click="OnOpenConflictFolder"/>
+            </StackPanel>
+
+            <CheckBox x:Name="AutoRefreshCheck"
+                      Content="Auto-atualizar"
+                      HorizontalAlignment="Right"
+                      VerticalAlignment="Center"
+                      Checked="OnAutoRefreshChanged"
+                      Unchecked="OnAutoRefreshChanged"/>
+        </Grid>
+    </Grid>
+</ui:PixelWindow>

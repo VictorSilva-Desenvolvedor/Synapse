@@ -1,16 +1,18 @@
 <#
 .SYNOPSIS
-    Captura screenshots das telas WinForms do Synapse.Tray via FlaUI (UIA3).
+    Captura screenshots das telas WPF do Synapse.Tray via RenderTargetBitmap.
 
 .DESCRIPTION
-    Executa os testes de captura em tests/Synapse.Tests/UI/FlaUiCaptureTests.cs e
-    grava os PNGs em artifacts/screenshots/. Usado pelo agente pixel-art-frontend
-    no ciclo capturar -> pontuar -> patchar -> recapturar.
+    Executa os testes de captura em tests/Synapse.Tests/UI/WpfCaptureTests.cs e grava
+    os PNGs em artifacts/screenshots/. Usado pelo agente pixel-art-frontend no ciclo
+    capturar -> pontuar -> patchar -> recapturar.
 
-    Requer sessao interativa com desktop (nao roda headless).
+    A captura usa RenderTargetBitmap em 96 DPI fixo (1 DIP = 1 pixel do PNG), entao
+    o resultado nao depende do DPI do monitor. As janelas sao mostradas fora da tela
+    para nao roubar o foco.
 
 .PARAMETER Screen
-    Nome do form a capturar, ex.: OnboardingForm, QuickCaptureForm, TrayContextMenu.
+    Nome da janela a capturar, ex.: OnboardingWindow, QuickCaptureWindow, ChatVaultWindow.
     Aceita nome parcial. Omita para capturar todas.
 
 .PARAMETER SaveBefore
@@ -20,7 +22,7 @@
     Nao recompila antes de capturar.
 
 .EXAMPLE
-    powershell -File scripts/capture-ui.ps1 -SaveBefore -Screen QuickCaptureForm
+    powershell -File scripts/capture-ui.ps1 -SaveBefore -Screen QuickCaptureWindow
 .EXAMPLE
     powershell -File scripts/capture-ui.ps1
 #>
@@ -57,8 +59,8 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { throw "Build falhou. Corrija a compilacao antes de capturar." }
 }
 
-$filter = if ($Screen) { "FullyQualifiedName~FlaUI_CanCapture_$Screen" }
-          else         { "FullyQualifiedName~FlaUiCaptureTests" }
+$filter = if ($Screen) { "FullyQualifiedName~Captura_$Screen" }
+          else         { "FullyQualifiedName~Synapse.Tests.UI" }
 
 Write-Host "[captura] filtro: $filter"
 dotnet test $testProj --filter $filter -v quiet --nologo

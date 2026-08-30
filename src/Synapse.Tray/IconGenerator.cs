@@ -1,3 +1,5 @@
+using System.Drawing;
+using System.Windows.Forms;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using Synapse.Tray.UI;
@@ -12,6 +14,21 @@ public static class IconGenerator
 {
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern bool DestroyIcon(IntPtr handle);
+
+    /// <summary>
+    /// Icon.FromHandle(bitmap.GetHicon()) nao assume dono do handle nativo: Icon.Dispose()
+    /// nao chama DestroyIcon nesse caso, entao cada icone gerado por este arquivo vaza um
+    /// handle de USER/GDI se nao for destruido explicitamente. Como os icones aqui sao
+    /// recriados a cada poll da bandeja (SynapseTrayApp.UpdateUI), sem isso o processo
+    /// esgota a cota de handles em algumas horas e morre sem excecao gerenciada nem
+    /// relatorio de falha (o handle acaba antes do proprio WER conseguir alocar o dele).
+    /// </summary>
+    public static void ReleaseIcon(Icon? icon)
+    {
+        if (icon is null) return;
+        DestroyIcon(icon.Handle);
+        icon.Dispose();
+    }
 
     public static Icon CreateStatusIcon(Color color, Color pulseColor) =>
         CreatePixelArtIcon(color, pulseColor);
@@ -90,17 +107,17 @@ public static class IconGenerator
     {
         if (pausado)
         {
-            return CreatePixelArtIcon(SynapseTheme.Warning); // Âmbar / Pausado
+            return CreatePixelArtIcon(PixelPalette.Warning); // Âmbar / Pausado
         }
 
         return estado switch
         {
-            "Sincronizado" => CreatePixelArtIcon(SynapseTheme.NeonGreen),
-            "Sincronizando" => CreatePixelArtIcon(SynapseTheme.AccentPrimary, SynapseTheme.BorderHighlight),
-            "Offline" => CreatePixelArtIcon(SynapseTheme.Warning),
-            "AuthRequired" => CreatePixelArtIcon(SynapseTheme.Error, SynapseTheme.Warning),
-            "Erro" => CreatePixelArtIcon(SynapseTheme.Error),
-            _ => CreatePixelArtIcon(SynapseTheme.TextSecondary) // Desconectado
+            "Sincronizado" => CreatePixelArtIcon(PixelPalette.Success),
+            "Sincronizando" => CreatePixelArtIcon(PixelPalette.AccentPrimary, PixelPalette.EdgeHighlight),
+            "Offline" => CreatePixelArtIcon(PixelPalette.Warning),
+            "AuthRequired" => CreatePixelArtIcon(PixelPalette.Error, PixelPalette.Warning),
+            "Erro" => CreatePixelArtIcon(PixelPalette.Error),
+            _ => CreatePixelArtIcon(PixelPalette.TextSecondary) // Desconectado
         };
     }
 }

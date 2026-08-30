@@ -1,0 +1,188 @@
+<ui:PixelWindow x:Class="Synapse.Tray.Chat.ChatVaultWindow"
+                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                xmlns:ui="clr-namespace:Synapse.Tray.UI"
+                xmlns:chat="clr-namespace:Synapse.Tray.Chat"
+                Title="SEGUNDO CEREBRO (CHAT)"
+                Subtitle="Converse com as notas do seu cofre."
+                Width="900"
+                Height="680">
+
+    <ui:PixelWindow.Resources>
+
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <!-- Ficha de fonte: mora dentro da bolha da resposta que a citou, nao numa
+             tabela separada. Clicar abre a nota no editor padrao. -->
+        <Style x:Key="SourceChip" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="0,0,6,6"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chip"
+                                Background="Transparent"
+                                BorderBrush="{StaticResource AccentPrimaryEdgeDarkBrush}"
+                                BorderThickness="2"
+                                CornerRadius="0"
+                                SnapsToDevicePixels="True">
+                            <TextBlock x:Name="Label"
+                                       Text="{TemplateBinding Content}"
+                                       Foreground="{StaticResource AccentPrimaryBrush}"
+                                       FontFamily="{StaticResource FontBody}"
+                                       FontSize="{StaticResource FontSizeSmall}"
+                                       Margin="8,2,8,2"
+                                       TextOptions.TextRenderingMode="Aliased"
+                                       TextOptions.TextFormattingMode="Display"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chip" Property="Background" Value="{StaticResource AccentPrimaryBrush}"/>
+                                <Setter TargetName="Label" Property="Foreground" Value="{StaticResource VoidBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource AccentPrimaryBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Bolha de mensagem. Alinhamento e cor mudam por papel via DataTrigger:
+             usuario a direita em dedaleira, assistente a esquerda em musgo,
+             sistema centralizado em cinza. -->
+        <DataTemplate DataType="{x:Type chat:ChatMessage}">
+            <Grid Margin="0,0,0,12">
+                <Border x:Name="Bubble"
+                        MaxWidth="620"
+                        HorizontalAlignment="Left"
+                        Background="{StaticResource SurfaceBrush}"
+                        BorderBrush="{StaticResource EdgeLightBrush}"
+                        BorderThickness="2,2,0,0"
+                        CornerRadius="0"
+                        SnapsToDevicePixels="True">
+                    <Border BorderBrush="{StaticResource VoidBrush}"
+                            BorderThickness="0,0,2,2"
+                            CornerRadius="0">
+                        <StackPanel Margin="12,8,12,10">
+                            <TextBlock x:Name="Header"
+                                       Text="{Binding Header}"
+                                       Style="{StaticResource PixelHeadline}"
+                                       Foreground="{StaticResource AccentPrimaryBrush}"/>
+                            <TextBlock Text="{Binding Text}"
+                                       TextWrapping="Wrap"
+                                       LineHeight="24"
+                                       Margin="0,8,0,0"/>
+
+                            <!-- FONTES SOB DEMANDA: so aparece quando a resposta citou algo -->
+                            <ItemsControl ItemsSource="{Binding Sources}"
+                                          Visibility="{Binding HasSources, Converter={StaticResource BoolToVis}}"
+                                          Margin="0,12,0,-6">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Style="{StaticResource SourceChip}"
+                                                Content="{Binding Label}"
+                                                ToolTip="Abrir a nota"
+                                                Click="OnSourceChip"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                </Border>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Role}" Value="User">
+                    <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Right"/>
+                    <Setter TargetName="Bubble" Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
+                    <Setter TargetName="Header" Property="Foreground" Value="{StaticResource AccentSecondaryBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Role}" Value="System">
+                    <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Center"/>
+                    <Setter TargetName="Bubble" Property="Background" Value="Transparent"/>
+                    <Setter TargetName="Bubble" Property="BorderThickness" Value="0"/>
+                    <Setter TargetName="Header" Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+    </ui:PixelWindow.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- HISTORICO — agora ocupa a janela inteira. A tabela fixa de fontes que
+             comia 240px mesmo vazia foi substituida pelas fichas dentro da bolha. -->
+        <Grid Grid.Row="0" Background="{StaticResource VoidBrush}">
+            <ScrollViewer x:Name="HistoryScroll"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Padding="16,12,16,12">
+                <ItemsControl x:Name="HistoryList"/>
+            </ScrollViewer>
+
+            <TextBlock x:Name="HistoryEmptyState"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       TextAlignment="Center"
+                       LineHeight="26"
+                       Style="{StaticResource PixelCaption}"
+                       Text="TERMINAL PRONTO PARA CONVERSAR.&#10;&#10;Conte algo que queira guardar, ou pergunte sobre suas notas."/>
+        </Grid>
+
+        <!-- ENTRADA -->
+        <Border Grid.Row="1"
+                Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource EdgeBrush}"
+                BorderThickness="0,2,0,0"
+                SnapsToDevicePixels="True">
+            <Grid Margin="16,12,16,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBox x:Name="InputBox"
+                         Grid.Row="0" Grid.Column="0"
+                         MinHeight="36"
+                         Margin="0,0,8,0"
+                         KeyDown="OnInputKeyDown"/>
+
+                <Button x:Name="SendButton"
+                        Grid.Row="0" Grid.Column="1"
+                        Content="ENVIAR"
+                        MinWidth="130"
+                        Margin="0,0,8,0"
+                        Style="{StaticResource PixelButtonPrimary}"
+                        Click="OnSend"/>
+
+                <Button x:Name="SaveNoteButton"
+                        Grid.Row="0" Grid.Column="2"
+                        Content="SALVAR COMO NOTA"
+                        MinWidth="220"
+                        IsEnabled="False"
+                        Click="OnSaveNote"/>
+
+                <TextBlock x:Name="StatusText"
+                           Grid.Row="1" Grid.ColumnSpan="3"
+                           Style="{StaticResource PixelCaption}"
+                           Margin="0,10,0,0"
+                           TextTrimming="CharacterEllipsis"
+                           Text="Inicializando indice semantico..."/>
+            </Grid>
+        </Border>
+    </Grid>
+</ui:PixelWindow>

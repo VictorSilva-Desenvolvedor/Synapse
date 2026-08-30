@@ -4,13 +4,33 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <!-- WinForms permanece habilitado apenas pelo NotifyIcon (a API de bandeja do Windows
+         exige System.Drawing.Icon; o WPF nao tem equivalente nativo). Toda a UI e WPF. -->
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+    <StartupObject>Synapse.Tray.Program</StartupObject>
     <ApplicationIcon></ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!-- WFAC010 pede para tirar o DPI do app.manifest e usar ApplicationHighDpiMode.
+         Aqui o conselho nao se aplica: essa propriedade e da API do WinForms e nao
+         configura o WPF, que le a consciencia de DPI do MANIFESTO. O analisador so
+         dispara porque UseWindowsForms esta ligado pelo NotifyIcon da bandeja.
+         Remover a declaracao do manifesto tiraria o PerMonitorV2 e o Windows passaria
+         a escalar o bitmap da janela com filtro suave — o oposto da Lei Zero. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
 
+  <!-- Sem os usings implicitos de WinForms: com WPF ligado eles tornam ambiguos
+       Application, Color, Brush, Point, Size, Button, MessageBox e dezenas de outros.
+       Os poucos arquivos que ainda usam WinForms declaram o using explicitamente. -->
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <!-- UseWPF+UseWindowsForms juntos encolhem o conjunto implicito padrao; recompoe. -->
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
   </ItemGroup>
 
   <ItemGroup>
@@ -25,7 +45,10 @@
     <InternalsVisibleTo Include="Synapse.Tests" />
   </ItemGroup>
 
+  <!-- Fontes pixel: Resource para o WPF (pack URI), EmbeddedResource para o
+       PrivateFontCollection do GDI+ que ainda desenha o icone da bandeja. -->
   <ItemGroup>
+    <Resource Include="Resources\Fonts\**\*.ttf" />
     <EmbeddedResource Include="Resources\Fonts\**" />
   </ItemGroup>
 

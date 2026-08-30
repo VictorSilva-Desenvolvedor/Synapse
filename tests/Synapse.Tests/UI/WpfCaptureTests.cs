@@ -148,7 +148,7 @@ public sealed class WpfCaptureTests
                 // a tela pontuada deixaria de ser a tela entregue.
                 var panel = new TrayMenuPanel();
                 panel.SetStatus(TrayStatusKind.Ok, "Sincronizado", "ultimo sync 14:32 · 0 pendentes");
-                items.Children.Add(panel);
+                items.Children.Add(panel.AsMenuItem());
 
                 Sep();
                 Item("Pausar Sincronizacao");

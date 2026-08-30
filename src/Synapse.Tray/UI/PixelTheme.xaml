@@ -641,6 +641,29 @@
         <Setter Property="ui:Pixel.PressedBackground" Value="{StaticResource AccentPrimaryEdgeDarkBrush}"/>
     </Style>
 
+    <!-- Cabeca do menu da bandeja (status + ladrilhos) dentro do ContextMenu real.
+         O ContextMenu envolve todo item que nao seja MenuItem/Separator num MenuItem
+         gerado, e o template de MenuItem daqui desenha o Header como TEXTO — o painel
+         inteiro nunca entrava na arvore visual e sobrava uma faixa vazia no topo do menu.
+         Entregar um MenuItem pronto evita o embrulho, e este template devolve o conteudo
+         como conteudo. StaysOpenOnClick porque clicar no bloco de status nao e uma acao;
+         os ladrilhos fecham o menu por conta propria, em RunFromTile. -->
+    <Style x:Key="TrayMenuHead" TargetType="MenuItem">
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="StaysOpenOnClick" Value="True"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="UseLayoutRounding" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="MenuItem">
+                    <ContentPresenter ContentSource="Header" SnapsToDevicePixels="True"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Cabecalho de status do menu: nao clicavel, em Press Start 2P sobre o acento.
          Nao usa IsEnabled=False: o trigger de desabilitado do template pintaria o texto
          de TextDisabled e mataria o acento. IsHitTestVisible+Focusable dao o mesmo

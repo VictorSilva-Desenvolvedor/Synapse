@@ -80,7 +80,7 @@ public sealed class SynapseTrayApp : IDisposable
         {
             Items =
             {
-                _panel,
+                _panel.AsMenuItem(),
                 new Separator(),
                 _pauseResumeItem,
                 NewItem("Reconectar GitHub", async () => await ReconnectAsync()),

@@ -102,6 +102,20 @@ public sealed class TrayMenuPanel : StackPanel
     }
 
     /// <summary>
+    /// Embrulha o painel num MenuItem proprio, para uso dentro de um ContextMenu.
+    ///
+    /// Adicionar o painel direto em ContextMenu.Items nao funciona: o menu so aceita como
+    /// container um item que ja seja MenuItem ou Separator, e envolve qualquer outro num
+    /// MenuItem gerado — cujo template (PixelTheme) desenha o Header como texto. O painel
+    /// virava uma faixa vazia. Com o MenuItem pronto, nao ha embrulho.
+    /// </summary>
+    public MenuItem AsMenuItem() => new()
+    {
+        Header = this,
+        Style = (Style)Res("TrayMenuHead")
+    };
+
+    /// <summary>
     /// Dispara o ladrilho correspondente a uma tecla 1-4. Retorna true se tratou.
     ///
     /// Os ladrilhos sao Button, nao MenuItem, entao a navegacao por setas do ContextMenu

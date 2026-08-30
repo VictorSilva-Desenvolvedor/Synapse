@@ -676,16 +676,9 @@ public sealed class RemoteCommandExecutor
                 "Parâmetro 'question' não informado no payload.");
         }
 
-        if (string.IsNullOrWhiteSpace(config.GeminiApiKey))
-        {
-            _logger?.LogWarning("Comando AskVault rejeitado: Chave da API Gemini não configurada.");
-            return new RemoteCommandResult(
-                command.Id,
-                DateTimeOffset.UtcNow,
-                RemoteCommandStatus.Rejected,
-                "Chave da API Gemini não configurada nas configurações do Synapse.");
-        }
-
+        // Nao exige GeminiApiKey especificamente: com o fallback automatico
+        // (BrainProviderFactory), _brainQuery pode estar respondendo via Ollama local
+        // mesmo sem nenhuma chave Gemini configurada. A checagem que importa e a de baixo.
         if (_brainQuery == null)
         {
             _logger?.LogWarning("Comando AskVault rejeitado: IVaultBrainQuery não configurado.");

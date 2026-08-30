@@ -16,7 +16,8 @@ public sealed class BrainConfig
 
     // Configurações do Ollama (Local & 100% Offline)
     public string OllamaEndpoint { get; set; } = "http://localhost:11434";
-    public string OllamaModel { get; set; } = "llama3.2";
+    public string OllamaModel { get; set; } = "llama3.1:8b";
+    public string OllamaEmbeddingModel { get; set; } = "nomic-embed-text";
 
     // Pastas de destino no cofre
     public string DefaultFolder { get; set; } = "Brain";

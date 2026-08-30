@@ -39,6 +39,12 @@ public sealed class SynapseConfig
     public string GeminiApiKey { get; set; } = string.Empty;
     public string GeminiModel { get; set; } = "gemini-3.6-flash";
 
+    // Configurações do Ollama local, usado como fallback automático quando o Gemini
+    // falha (cota diária excedida, indisponibilidade, etc.) - ver FallbackAiProvider.
+    public string OllamaEndpoint { get; set; } = "http://localhost:11434";
+    public string OllamaModel { get; set; } = "llama3.1:8b";
+    public string OllamaEmbeddingModel { get; set; } = "nomic-embed-text";
+
     // Controle Remoto via GitHub Relay (Fase 1 e Fase 2)
     public bool RemoteControlEnabled { get; set; } = false;
     public int RemoteControlPollingIntervalSeconds { get; set; } = 10;

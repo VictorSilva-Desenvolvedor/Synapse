@@ -413,19 +413,13 @@ public sealed class SynapseTrayApp : IDisposable
             var confirmationPrompt = new WpfConfirmationPrompt(_dispatcher);
             var uiAutomation = new WindowsUiAutomationAdapter();
 
-            IVaultBrainQuery? brainQuery = null;
-            if (!string.IsNullOrWhiteSpace(config.GeminiApiKey))
-            {
-                var brainConfig = new BrainConfig
-                {
-                    GeminiApiKey = config.GeminiApiKey,
-                    GeminiModel = string.IsNullOrWhiteSpace(config.GeminiModel) ? "gemini-3.6-flash" : config.GeminiModel
-                };
-
-                brainQuery = new VaultRagEngine(
-                    new GeminiEmbeddingProvider(brainConfig),
-                    new GeminiAiProvider(brainConfig));
-            }
+            // Constroi o brainQuery mesmo sem chave Gemini configurada: o BrainProviderFactory
+            // cai para Ollama local sozinho nesse caso, entao o AskVault remoto continua
+            // funcionando (com fallback automatico Gemini->Ollama quando a chave existe).
+            var brainConfig = BrainProviderFactory.BuildBrainConfig(config);
+            IVaultBrainQuery brainQuery = new VaultRagEngine(
+                BrainProviderFactory.CreateEmbeddingProvider(brainConfig),
+                BrainProviderFactory.CreateAiProvider(brainConfig));
 
             var executor = new RemoteCommandExecutor(
                 () => configManager.LoadAsync(),

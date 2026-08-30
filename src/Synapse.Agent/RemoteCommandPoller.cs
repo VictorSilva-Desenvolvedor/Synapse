@@ -22,6 +22,14 @@ public sealed class RemoteCommandPoller
         WriteIndented = true
     };
 
+    // Encoding.UTF8 escreve um BOM no inicio do arquivo por padrao. O PWA remoto decodifica
+    // o arquivo (base64 -> texto) e chama JSON.parse direto - um BOM sobrando vira um
+    // caractere invisivel antes do '{' que quebra o parse com SyntaxError. Como o parse
+    // falha DEPOIS do polling ja ter encontrado o arquivo (parando de tentar de novo), o
+    // resultado nunca chegava a aparecer: o app do celular ficava preso em "Pensando..."
+    // para sempre, mesmo com o resultado certo ja disponivel no GitHub.
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
     private readonly ICloudProvider _cloudProvider;
     private readonly RemoteCommandExecutor _executor;
     private readonly RemoteAuditLog _auditLog;
@@ -142,7 +150,7 @@ public sealed class RemoteCommandPoller
 
             // Grava o arquivo com o nome exato esperado
             var namedResultPath = Path.Combine(resultDir ?? Path.GetTempPath(), resultFileName);
-            await File.WriteAllTextAsync(namedResultPath, resultJson, Encoding.UTF8, ct);
+            await File.WriteAllTextAsync(namedResultPath, resultJson, Utf8NoBom, ct);
 
             _logger?.LogInformation("Enviando resultado do comando {CommandId} ({Status}) para o GitHub...", command.Id, result.Status);
             await _cloudProvider.UploadAsync(namedResultPath, ".synapse/remote/results", ct);
@@ -196,7 +204,7 @@ public sealed class RemoteCommandPoller
             {
                 Directory.CreateDirectory(dir);
             }
-            await File.WriteAllTextAsync(_cursorFilePath, cursor.Trim(), Encoding.UTF8, ct);
+            await File.WriteAllTextAsync(_cursorFilePath, cursor.Trim(), Utf8NoBom, ct);
         }
         catch (Exception ex)
         {

@@ -116,15 +116,11 @@ public partial class ChatVaultWindow : PixelWindow
             return;
         }
 
-        var brainConfig = new BrainConfig
-        {
-            GeminiApiKey = config.GeminiApiKey,
-            GeminiModel = string.IsNullOrWhiteSpace(config.GeminiModel) ? "gemini-3.6-flash" : config.GeminiModel
-        };
+        var brainConfig = BrainProviderFactory.BuildBrainConfig(config);
 
         _ragEngine = new VaultRagEngine(
-            new GeminiEmbeddingProvider(brainConfig),
-            new GeminiAiProvider(brainConfig),
+            BrainProviderFactory.CreateEmbeddingProvider(brainConfig),
+            BrainProviderFactory.CreateAiProvider(brainConfig),
             brainConfig);
 
         StatusText.Text = "Indexando notas do cofre...";

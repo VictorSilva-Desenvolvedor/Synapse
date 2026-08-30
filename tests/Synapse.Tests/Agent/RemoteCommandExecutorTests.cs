@@ -621,8 +621,11 @@ public class RemoteCommandExecutorTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_AskVault_WhenGeminiApiKeyMissing_ShouldRejectWithoutThrowing()
+    public async Task ExecuteAsync_AskVault_WhenGeminiApiKeyMissingButBrainQueryAvailable_ShouldStillAnswer()
     {
+        // Sem chave Gemini nao significa "sem IA": o fallback automatico (BrainProviderFactory)
+        // pode ter montado o brainQuery so com Ollama local. A ausencia de GeminiApiKey sozinha
+        // nao deve mais rejeitar o comando - so a ausencia de brainQuery em si (ver teste abaixo).
         var config = new SynapseConfig
         {
             RemoteControlEnabled = true,
@@ -631,6 +634,8 @@ public class RemoteCommandExecutorTests : IDisposable
         };
 
         var mockBrain = Substitute.For<IVaultBrainQuery>();
+        mockBrain.ProcessChatTurnAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ChatTurnOutcome("Resposta via Ollama local.", null, []));
         var executor = new RemoteCommandExecutor(config, brainQuery: mockBrain);
         var command = new RemoteCommand(
             Id: Guid.NewGuid(),
@@ -641,9 +646,7 @@ public class RemoteCommandExecutorTests : IDisposable
 
         var result = await executor.ExecuteAsync(command);
 
-        result.Status.ShouldBe(RemoteCommandStatus.Rejected);
-        result.Message.ShouldContain("Gemini");
-        await mockBrain.DidNotReceiveWithAnyArgs().ProcessChatTurnAsync(default!, default!, default);
+        result.Status.ShouldBe(RemoteCommandStatus.Success);
     }
 
     [Fact]

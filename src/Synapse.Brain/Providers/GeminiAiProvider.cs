@@ -26,7 +26,12 @@ public sealed class GeminiAiProvider : IBrainAiProvider
     public GeminiAiProvider(BrainConfig config, HttpClient? httpClient = null)
     {
         _config = config;
-        _httpClient = httpClient ?? new HttpClient();
+        // Timeout explicito e curto (padrao do HttpClient e 100s): quando este provedor e
+        // usado dentro do FallbackAiProvider, um Gemini que trava LENTO em vez de falhar
+        // rapido (ex.: 429) consome o orcamento de tempo inteiro antes do Ollama sequer
+        // ser tentado - o PWA remoto tem timeout fixo de 65-75s do lado do celular, entao
+        // um Gemini "so devagar" e pior que um Gemini que erra na hora.
+        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
     }
 
     public async Task<AiStructuredNote> ProcessRawNoteAsync(

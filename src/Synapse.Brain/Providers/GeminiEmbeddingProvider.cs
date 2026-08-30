@@ -18,7 +18,9 @@ public sealed class GeminiEmbeddingProvider : IEmbeddingProvider
     public GeminiEmbeddingProvider(BrainConfig config, HttpClient? httpClient = null)
     {
         _config = config;
-        _httpClient = httpClient ?? new HttpClient();
+        // Ver GeminiAiProvider: timeout curto para nao consumir o orcamento de tempo do
+        // FallbackEmbeddingProvider quando o Gemini trava lento em vez de falhar rapido.
+        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
     }
 
     public async Task<float[]> GenerateEmbeddingAsync(string text, CancellationToken ct = default)

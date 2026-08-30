@@ -20,6 +20,11 @@ public sealed class FakeCloudProvider : ICloudProvider
     private readonly Queue<Exception> _scheduledFailures = new();
     private int _nextId = 1;
 
+    public int UploadCount { get; private set; }
+    public int UpdateCount { get; private set; }
+    public int DownloadCount { get; private set; }
+    public int GetMetadataCount { get; private set; }
+
     public FakeCloudProvider(IFileSystem fileSystem, TimeProvider? timeProvider = null)
     {
         _fileSystem = fileSystem;
@@ -37,6 +42,7 @@ public sealed class FakeCloudProvider : ICloudProvider
     public async Task<CloudFile> UploadAsync(string localPath, string remoteFolderId, CancellationToken ct)
     {
         LancarSeAgendado();
+        UploadCount++;
         var content = await _fileSystem.ReadAllTextAsync(localPath, ct);
         var id = $"fake-{_nextId++}";
         var meta = new CloudFile(id, Path.GetFileName(localPath), Md5(content), _timeProvider.GetUtcNow(), Trashed: false);
@@ -50,6 +56,7 @@ public sealed class FakeCloudProvider : ICloudProvider
     public async Task<CloudFile> UpdateAsync(string cloudFileId, string localPath, CancellationToken ct)
     {
         LancarSeAgendado();
+        UpdateCount++;
         if (!_metaByFileId.TryGetValue(cloudFileId, out var existing))
             throw new CloudNotFoundException($"Arquivo {cloudFileId} não existe no FakeCloudProvider.");
 
@@ -65,6 +72,7 @@ public sealed class FakeCloudProvider : ICloudProvider
     public async Task DownloadAsync(string cloudFileId, string destinationPath, CancellationToken ct)
     {
         LancarSeAgendado();
+        DownloadCount++;
         if (!_contentByFileId.TryGetValue(cloudFileId, out var content))
             throw new CloudNotFoundException($"Arquivo {cloudFileId} não existe no FakeCloudProvider.");
 
@@ -89,6 +97,7 @@ public sealed class FakeCloudProvider : ICloudProvider
     public Task<CloudFile> GetMetadataAsync(string cloudFileId, CancellationToken ct)
     {
         LancarSeAgendado();
+        GetMetadataCount++;
         if (!_metaByFileId.TryGetValue(cloudFileId, out var meta))
             throw new CloudNotFoundException($"Arquivo {cloudFileId} não existe no FakeCloudProvider.");
 

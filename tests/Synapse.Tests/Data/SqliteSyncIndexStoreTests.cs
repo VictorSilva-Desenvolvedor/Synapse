@@ -23,7 +23,7 @@ public class SqliteSyncIndexStoreTests : IDisposable
         if (File.Exists(_dbPath)) File.Delete(_dbPath);
     }
 
-    private static SyncedFileRecord NovoRegistro(string localPath = "notas/exemplo.md") => new(
+    private static SyncedFileRecord NovoRegistro(string localPath = "notas/exemplo.md", string? cloudContentHash = "sha-git-123") => new(
         Id: 0,
         LocalPath: localPath,
         CloudFileId: "drive-id-1",
@@ -31,7 +31,8 @@ public class SqliteSyncIndexStoreTests : IDisposable
         LocalMtime: DateTimeOffset.UtcNow,
         CloudModifiedTime: DateTimeOffset.UtcNow,
         LastSyncedAt: DateTimeOffset.UtcNow,
-        Status: SyncStatus.Synced);
+        Status: SyncStatus.Synced,
+        CloudContentHash: cloudContentHash);
 
     [Fact]
     public async Task UpsertEFind_FazRoundTripDosCampos()
@@ -45,6 +46,7 @@ public class SqliteSyncIndexStoreTests : IDisposable
         encontrado.LocalPath.ShouldBe(registro.LocalPath);
         encontrado.CloudFileId.ShouldBe(registro.CloudFileId);
         encontrado.ContentHash.ShouldBe(registro.ContentHash);
+        encontrado.CloudContentHash.ShouldBe(registro.CloudContentHash);
         encontrado.Status.ShouldBe(SyncStatus.Synced);
         encontrado.LocalMtime.ToUnixTimeMilliseconds().ShouldBe(registro.LocalMtime.ToUnixTimeMilliseconds());
     }
@@ -193,5 +195,55 @@ public class SqliteSyncIndexStoreTests : IDisposable
 
         item.ShouldNotBeNull();
         item.FilePath.ShouldBe("notas/sobrevive.md");
+    }
+
+    [Fact]
+    public async Task Migracao_BancoLegadoSemColunaCloudContentHash_AdicionaColunaSemQuebrarDadosExistentes()
+    {
+        var legacyDbPath = Path.Combine(Path.GetTempPath(), $"synapse-legacy-{Guid.NewGuid():N}.db");
+        try
+        {
+            // Cria banco com schema legado de 8 colunas (sem CloudContentHash)
+            using (var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={legacyDbPath};Pooling=false"))
+            {
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = """
+                    CREATE TABLE SyncedFiles (
+                        Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        LocalPath TEXT NOT NULL UNIQUE,
+                        CloudFileId TEXT NULL,
+                        ContentHash TEXT NOT NULL,
+                        LocalMtime INTEGER NOT NULL,
+                        CloudModifiedTime INTEGER NULL,
+                        LastSyncedAt INTEGER NOT NULL,
+                        Status TEXT NOT NULL
+                    );
+                    INSERT INTO SyncedFiles (LocalPath, CloudFileId, ContentHash, LocalMtime, CloudModifiedTime, LastSyncedAt, Status)
+                    VALUES ('nota-legada.md', 'drive-123', 'hash-legado', 1000000, 1000000, 1000000, 'Synced');
+                    """;
+                cmd.ExecuteNonQuery();
+            }
+
+            // Abre com SqliteSyncIndexStore (executa EnsureSchema e MigrateSchema)
+            using var migratedStore = SqliteSyncIndexStore.ForFile(legacyDbPath);
+
+            var registroLegado = await migratedStore.FindByLocalPathAsync("nota-legada.md", CancellationToken.None);
+            registroLegado.ShouldNotBeNull();
+            registroLegado.LocalPath.ShouldBe("nota-legada.md");
+            registroLegado.CloudContentHash.ShouldBeNull();
+
+            // Grava novo registro com CloudContentHash
+            var novo = NovoRegistro("nova-nota.md", "sha-git-456");
+            await migratedStore.UpsertAsync(novo, CancellationToken.None);
+
+            var registroNovo = await migratedStore.FindByLocalPathAsync("nova-nota.md", CancellationToken.None);
+            registroNovo.ShouldNotBeNull();
+            registroNovo.CloudContentHash.ShouldBe("sha-git-456");
+        }
+        finally
+        {
+            if (File.Exists(legacyDbPath)) File.Delete(legacyDbPath);
+        }
     }
 }

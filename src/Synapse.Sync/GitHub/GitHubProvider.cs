@@ -48,76 +48,66 @@ public sealed class GitHubProvider : ICloudProvider, IDisposable
         var bytes = await File.ReadAllBytesAsync(localPath, ct);
         var base64Content = Convert.ToBase64String(bytes);
 
-        var payload = new
-        {
-            message = $"Sync: criar {relativePath}",
-            content = base64Content,
-            branch = _config.Branch
-        };
-
-        var json = JsonSerializer.Serialize(payload);
         var url = BuildContentsUrl(relativePath);
 
-        try
+        // Até 3 tentativas: a Contents API do GitHub usa SHA otimista, e dois processos
+        // distintos (Host sincronizando e Agente escrevendo resultado de comando remoto,
+        // por exemplo) podem colidir na mesma fração de segundo. A 1a tentativa nao envia
+        // sha (assume criacao); se o GitHub responder que o arquivo ja existe (422) ou que
+        // o sha esta desatualizado (409, alguem escreveu no meio do caminho), busca o sha
+        // atual de novo e tenta mais uma vez, em vez de descartar o resultado silenciosamente.
+        string? sha = null;
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= 3; attempt++)
         {
-            using var response = await SendAuthorizedRequestAsync(HttpMethod.Put, url, new StringContent(json, Encoding.UTF8, "application/json"), ct);
+            object payload = sha is null
+                ? new { message = $"Sync: criar {relativePath}", content = base64Content, branch = _config.Branch }
+                : new { message = $"Sync: atualizar {relativePath}", content = base64Content, sha, branch = _config.Branch };
 
-            if (!response.IsSuccessStatusCode)
+            var json = JsonSerializer.Serialize(payload);
+
+            try
             {
-                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                using var response = await SendAuthorizedRequestAsync(HttpMethod.Put, url, new StringContent(json, Encoding.UTF8, "application/json"), ct);
 
-                // Se o arquivo já existir no GitHub ("sha wasn't supplied"), recupera o SHA e reenvia
-                if (response.StatusCode == System.Net.HttpStatusCode.UnprocessableEntity && errorBody.Contains("sha", StringComparison.OrdinalIgnoreCase))
+                if (!response.IsSuccessStatusCode)
                 {
-                    var existingFile = await GetContentInternalAsync(relativePath, ct);
-                    if (existingFile?.Sha != null)
-                    {
-                        var retryPayload = new
-                        {
-                            message = $"Sync: atualizar {relativePath}",
-                            content = base64Content,
-                            sha = existingFile.Sha,
-                            branch = _config.Branch
-                        };
-                        using var retryResponse = await SendAuthorizedRequestAsync(
-                            HttpMethod.Put,
-                            url,
-                            new StringContent(JsonSerializer.Serialize(retryPayload), Encoding.UTF8, "application/json"),
-                            ct);
+                    var errorBody = await response.Content.ReadAsStringAsync(ct);
+                    var isStaleShaConflict =
+                        (response.StatusCode == System.Net.HttpStatusCode.UnprocessableEntity && errorBody.Contains("sha", StringComparison.OrdinalIgnoreCase)) ||
+                        response.StatusCode == System.Net.HttpStatusCode.Conflict;
 
-                        if (retryResponse.IsSuccessStatusCode)
-                        {
-                            var retryBody = await retryResponse.Content.ReadAsStringAsync(ct);
-                            var retryRes = JsonSerializer.Deserialize<GitHubContentResponse>(retryBody);
-                            return new CloudFile(
-                                Id: retryRes?.Content?.Path ?? relativePath,
-                                Name: retryRes?.Content?.Name ?? fileName,
-                                Md5Checksum: retryRes?.Content?.Sha ?? string.Empty,
-                                ModifiedTime: DateTimeOffset.UtcNow,
-                                Trashed: false);
-                        }
+                    if (isStaleShaConflict && attempt < 3)
+                    {
+                        var existingFile = await GetContentInternalAsync(relativePath, ct);
+                        sha = existingFile?.Sha;
+                        lastError = GitHubExceptionMapper.Map(response, errorBody);
+                        continue;
                     }
+
+                    throw GitHubExceptionMapper.Map(response, errorBody);
                 }
 
-                throw GitHubExceptionMapper.Map(response, errorBody);
+                var resBody = await response.Content.ReadAsStringAsync(ct);
+                var contentRes = JsonSerializer.Deserialize<GitHubContentResponse>(resBody);
+
+                _logger?.LogInformation("Upload concluído para o GitHub: {Path} (SHA: {Sha})", relativePath, contentRes?.Content?.Sha);
+
+                return new CloudFile(
+                    Id: contentRes?.Content?.Path ?? relativePath,
+                    Name: contentRes?.Content?.Name ?? fileName,
+                    Md5Checksum: contentRes?.Content?.Sha ?? string.Empty,
+                    ModifiedTime: DateTimeOffset.UtcNow,
+                    Trashed: false);
             }
-
-            var resBody = await response.Content.ReadAsStringAsync(ct);
-            var contentRes = JsonSerializer.Deserialize<GitHubContentResponse>(resBody);
-
-            _logger?.LogInformation("Upload concluído para o GitHub: {Path} (SHA: {Sha})", relativePath, contentRes?.Content?.Sha);
-
-            return new CloudFile(
-                Id: contentRes?.Content?.Path ?? relativePath,
-                Name: contentRes?.Content?.Name ?? fileName,
-                Md5Checksum: contentRes?.Content?.Sha ?? string.Empty,
-                ModifiedTime: DateTimeOffset.UtcNow,
-                Trashed: false);
+            catch (Exception ex) when (ex is not CloudAuthExpiredException and not CloudQuotaExceededException and not CloudNotFoundException and not CloudTransientException)
+            {
+                throw GitHubExceptionMapper.Map(ex);
+            }
         }
-        catch (Exception ex) when (ex is not CloudAuthExpiredException and not CloudQuotaExceededException and not CloudNotFoundException and not CloudTransientException)
-        {
-            throw GitHubExceptionMapper.Map(ex);
-        }
+
+        throw lastError ?? new CloudTransientException($"Falha ao enviar '{relativePath}' para o GitHub após múltiplas tentativas.");
     }
 
     public async Task<CloudFile> UpdateAsync(string cloudFileId, string localPath, CancellationToken ct)

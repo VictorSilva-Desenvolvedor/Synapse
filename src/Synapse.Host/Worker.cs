@@ -37,6 +37,7 @@ public sealed class Worker : BackgroundService
 
     private readonly Channel<VaultChangeEvent> _eventChannel = Channel.CreateUnbounded<VaultChangeEvent>();
     private readonly SynapseIgnoreMatcher _ignoreMatcher = new();
+    private readonly RecentSelfWriteTracker _selfWriteTracker;
     private Debouncer? _debouncer;
     private SyncQueueProcessor? _processor;
     private RemoteChangesPoller? _poller;
@@ -63,7 +64,8 @@ public sealed class Worker : BackgroundService
         IVaultWatcher vaultWatcher,
         SynapseHostPaths paths,
         ILogger<Worker> logger,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        RecentSelfWriteTracker? selfWriteTracker = null)
     {
         _indexStore = indexStore ?? throw new ArgumentNullException(nameof(indexStore));
         _cloudProvider = cloudProvider ?? throw new ArgumentNullException(nameof(cloudProvider));
@@ -76,6 +78,7 @@ public sealed class Worker : BackgroundService
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+        _selfWriteTracker = selfWriteTracker ?? new RecentSelfWriteTracker();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -122,7 +125,8 @@ public sealed class Worker : BackgroundService
             _indexStore,
             _conflictResolver,
             _fileSystem,
-            processorOptions);
+            processorOptions,
+            selfWriteTracker: _selfWriteTracker);
 
         _debouncer = new Debouncer(evt =>
         {
@@ -131,6 +135,12 @@ public sealed class Worker : BackgroundService
 
         _vaultWatcher.Changed += (_, evt) =>
         {
+            if (_selfWriteTracker.WasRecentlyWrittenByUs(evt.RelativePath))
+            {
+                _logger.LogDebug("Descartando evento de escrita própria recente (eco suprimido): {Path}", evt.RelativePath);
+                return;
+            }
+
             _debouncer.OnRawEvent(evt);
         };
 

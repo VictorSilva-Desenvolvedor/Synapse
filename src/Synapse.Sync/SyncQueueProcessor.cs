@@ -17,6 +17,7 @@ public sealed class SyncQueueProcessor
     private readonly SyncQueueProcessorOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly SyncBaseCache _baseCache;
+    private readonly RecentSelfWriteTracker? _selfWriteTracker;
 
     public SyncQueueProcessor(
         ICloudProvider cloudProvider,
@@ -24,7 +25,8 @@ public sealed class SyncQueueProcessor
         IConflictResolver conflictResolver,
         IFileSystem fileSystem,
         SyncQueueProcessorOptions options,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        RecentSelfWriteTracker? selfWriteTracker = null)
     {
         _cloudProvider = cloudProvider;
         _indexStore = indexStore;
@@ -33,6 +35,7 @@ public sealed class SyncQueueProcessor
         _options = options;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _baseCache = new SyncBaseCache(fileSystem, options.BaseCacheRootPath);
+        _selfWriteTracker = selfWriteTracker;
     }
 
     public Task EnqueueAsync(VaultChangeEvent evt, CancellationToken ct) =>
@@ -120,7 +123,7 @@ public sealed class SyncQueueProcessor
             ? await TryGetRemoteMetadataAsync(existing.CloudFileId, ct)
             : null;
         var remoteChanged = remoteMetadata is not null
-            && (existing.CloudModifiedTime is null || remoteMetadata.ModifiedTime > existing.CloudModifiedTime);
+            && !string.Equals(remoteMetadata.Md5Checksum, existing.CloudContentHash, StringComparison.Ordinal);
 
         if (!localChanged && !remoteChanged)
             return; // evento redundante - nada mudou de fato desde a ultima sincronizacao
@@ -157,7 +160,7 @@ public sealed class SyncQueueProcessor
         var cloudFile = await _cloudProvider.UploadAsync(localFullPath, _options.RemoteFolderId, ct);
         var now = _timeProvider.GetUtcNow();
 
-        await _indexStore.UpsertAsync(new SyncedFileRecord(0, relativePath, cloudFile.Id, localHash, now, cloudFile.ModifiedTime, now, SyncStatus.Synced), ct);
+        await _indexStore.UpsertAsync(new SyncedFileRecord(0, relativePath, cloudFile.Id, localHash, now, cloudFile.ModifiedTime, now, SyncStatus.Synced, cloudFile.Md5Checksum), ct);
         await _baseCache.WriteAsync(relativePath, localContent, ct);
     }
 
@@ -166,18 +169,20 @@ public sealed class SyncQueueProcessor
         var cloudFile = await _cloudProvider.UpdateAsync(existing.CloudFileId!, localFullPath, ct);
         var now = _timeProvider.GetUtcNow();
 
-        await _indexStore.UpsertAsync(existing with { ContentHash = localHash, LocalMtime = now, CloudModifiedTime = cloudFile.ModifiedTime, LastSyncedAt = now, Status = SyncStatus.Synced }, ct);
+        await _indexStore.UpsertAsync(existing with { ContentHash = localHash, LocalMtime = now, CloudModifiedTime = cloudFile.ModifiedTime, LastSyncedAt = now, Status = SyncStatus.Synced, CloudContentHash = cloudFile.Md5Checksum }, ct);
         await _baseCache.WriteAsync(relativePath, localContent, ct);
     }
 
     private async Task DownloadUpdateAsync(string relativePath, string localFullPath, SyncedFileRecord existing, CloudFile remoteMetadata, CancellationToken ct)
     {
+        _selfWriteTracker?.MarkWritten(relativePath);
         await _cloudProvider.DownloadAsync(existing.CloudFileId!, localFullPath, ct);
+        _selfWriteTracker?.MarkWritten(relativePath);
         var newContent = await _fileSystem.ReadAllTextAsync(localFullPath, ct);
         var newHash = ContentHasher.Sha256(newContent);
         var now = _timeProvider.GetUtcNow();
 
-        await _indexStore.UpsertAsync(existing with { ContentHash = newHash, LocalMtime = now, CloudModifiedTime = remoteMetadata.ModifiedTime, LastSyncedAt = now, Status = SyncStatus.Synced }, ct);
+        await _indexStore.UpsertAsync(existing with { ContentHash = newHash, LocalMtime = now, CloudModifiedTime = remoteMetadata.ModifiedTime, LastSyncedAt = now, Status = SyncStatus.Synced, CloudContentHash = remoteMetadata.Md5Checksum }, ct);
         await _baseCache.WriteAsync(relativePath, newContent, ct);
     }
 
@@ -222,7 +227,9 @@ public sealed class SyncQueueProcessor
         {
             var mergedContent = NoteContentSplitter.Join(resolvedFront.MergedContent, resolvedBody.MergedContent);
             var localFullPath = Path.Combine(_options.VaultRootPath, relativePath);
+            _selfWriteTracker?.MarkWritten(relativePath);
             await _fileSystem.WriteAllTextAsync(localFullPath, mergedContent, ct);
+            _selfWriteTracker?.MarkWritten(relativePath);
 
             await UploadUpdateAsync(relativePath, localFullPath, existing, mergedContent, ContentHasher.Sha256(mergedContent), ct);
             return;

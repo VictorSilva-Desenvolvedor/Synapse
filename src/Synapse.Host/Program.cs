@@ -70,6 +70,7 @@ builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 builder.Services.AddSingleton<GitHubAuthManager>();
 builder.Services.AddSingleton<ICloudProvider, GitHubProvider>();
 builder.Services.AddSingleton<IVaultWatcher, FileWatcherService>();
+builder.Services.AddSingleton<RecentSelfWriteTracker>();
 
 // Registro do Worker Principal
 builder.Services.AddHostedService<Worker>();

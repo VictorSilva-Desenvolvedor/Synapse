@@ -228,4 +228,83 @@ public class SyncQueueProcessorTests
 
         await tarefa;
     }
+
+    [Fact]
+    public async Task ShaRemotoIgualAoCloudContentHash_SemMudancaLocal_NaoChamaDownloadNemUpload()
+    {
+        await _fileSystem.WriteAllTextAsync(VaultPath("nota.md"), "conteudo", CancellationToken.None);
+        await _processor.EnqueueAsync(new VaultChangeEvent("nota.md", SyncEventType.Created), CancellationToken.None);
+        await _processor.DrainAsync(CancellationToken.None);
+
+        var registroAntes = await _indexStore.FindByLocalPathAsync("nota.md", CancellationToken.None);
+        registroAntes.ShouldNotBeNull();
+        registroAntes.CloudContentHash.ShouldNotBeNull();
+
+        var downloadsAntes = _cloudProvider.DownloadCount;
+        var uploadsAntes = _cloudProvider.UploadCount;
+        var updatesAntes = _cloudProvider.UpdateCount;
+
+        // Simula evento da fila disparado novamente (ex: watcher ou reconciliação)
+        await _processor.EnqueueAsync(new VaultChangeEvent("nota.md", SyncEventType.Modified), CancellationToken.None);
+        await _processor.DrainAsync(CancellationToken.None);
+
+        _cloudProvider.DownloadCount.ShouldBe(downloadsAntes);
+        _cloudProvider.UploadCount.ShouldBe(uploadsAntes);
+        _cloudProvider.UpdateCount.ShouldBe(updatesAntes);
+
+        var registroDepois = await _indexStore.FindByLocalPathAsync("nota.md", CancellationToken.None);
+        registroDepois!.LastSyncedAt.ShouldBe(registroAntes.LastSyncedAt);
+    }
+
+    [Fact]
+    public async Task ShaRemotoMudaDeVerdade_BaixaENovoCloudContentHashEhPersistido()
+    {
+        await _fileSystem.WriteAllTextAsync(VaultPath("nota.md"), "versao 1", CancellationToken.None);
+        await _processor.EnqueueAsync(new VaultChangeEvent("nota.md", SyncEventType.Created), CancellationToken.None);
+        await _processor.DrainAsync(CancellationToken.None);
+
+        var registro1 = await _indexStore.FindByLocalPathAsync("nota.md", CancellationToken.None);
+        registro1.ShouldNotBeNull();
+
+        _timeProvider.Advance(TimeSpan.FromSeconds(5));
+        var remoteMeta = _cloudProvider.SimularMudancaRemota(registro1.CloudFileId!, "versao 2 remota", _timeProvider.GetUtcNow());
+
+        await _processor.EnqueueAsync(new VaultChangeEvent("nota.md", SyncEventType.Modified), CancellationToken.None);
+        await _processor.DrainAsync(CancellationToken.None);
+
+        var conteudoLocal = await _fileSystem.ReadAllTextAsync(VaultPath("nota.md"), CancellationToken.None);
+        conteudoLocal.ShouldBe("versao 2 remota");
+
+        var registro2 = await _indexStore.FindByLocalPathAsync("nota.md", CancellationToken.None);
+        registro2!.CloudContentHash.ShouldBe(remoteMeta.Md5Checksum);
+        registro2.Status.ShouldBe(SyncStatus.Synced);
+    }
+
+    [Fact]
+    public async Task DownloadUpdateAsync_MarcaRecentSelfWriteTracker_EvitandoEcoDoWatcher()
+    {
+        var tracker = new RecentSelfWriteTracker(TimeSpan.FromSeconds(3), _timeProvider);
+        var options = new SyncQueueProcessorOptions(VaultRoot, "pasta-remota-raiz", CacheRoot, MaxAttempts: 3);
+        var processorComTracker = new SyncQueueProcessor(_cloudProvider, _indexStore, new ConflictResolver(), _fileSystem, options, _timeProvider, tracker);
+
+        await _fileSystem.WriteAllTextAsync(VaultPath("nota.md"), "versao 1", CancellationToken.None);
+        await processorComTracker.EnqueueAsync(new VaultChangeEvent("nota.md", SyncEventType.Created), CancellationToken.None);
+        await processorComTracker.DrainAsync(CancellationToken.None);
+
+        var registro = await _indexStore.FindByLocalPathAsync("nota.md", CancellationToken.None);
+
+        _timeProvider.Advance(TimeSpan.FromSeconds(5));
+        _cloudProvider.SimularMudancaRemota(registro!.CloudFileId!, "versao 2 remota", _timeProvider.GetUtcNow());
+
+        // Processa o download remoto
+        await processorComTracker.EnqueueAsync(new VaultChangeEvent("nota.md", SyncEventType.Modified), CancellationToken.None);
+        await processorComTracker.DrainAsync(CancellationToken.None);
+
+        // Verifica que o tracker marcou o caminho durante o DownloadUpdateAsync
+        tracker.WasRecentlyWrittenByUs("nota.md").ShouldBeTrue();
+
+        // Após expirar a janela, o tracker libera
+        _timeProvider.Advance(TimeSpan.FromSeconds(4));
+        tracker.WasRecentlyWrittenByUs("nota.md").ShouldBeFalse();
+    }
 }

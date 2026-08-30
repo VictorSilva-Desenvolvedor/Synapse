@@ -37,7 +37,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
                 LocalMtime INTEGER NOT NULL,
                 CloudModifiedTime INTEGER NULL,
                 LastSyncedAt INTEGER NOT NULL,
-                Status TEXT NOT NULL
+                Status TEXT NOT NULL,
+                CloudContentHash TEXT NULL
             );
             CREATE INDEX IF NOT EXISTS IX_SyncedFiles_CloudFileId ON SyncedFiles (CloudFileId);
 
@@ -66,12 +67,39 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
             );
             """;
         command.ExecuteNonQuery();
+
+        MigrateSchema();
+    }
+
+    private void MigrateSchema()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "PRAGMA table_info(SyncedFiles);";
+        using var reader = command.ExecuteReader();
+        var hasCloudContentHash = false;
+        while (reader.Read())
+        {
+            var name = reader.GetString(1);
+            if (string.Equals(name, "CloudContentHash", StringComparison.OrdinalIgnoreCase))
+            {
+                hasCloudContentHash = true;
+                break;
+            }
+        }
+        reader.Close();
+
+        if (!hasCloudContentHash)
+        {
+            using var alterCmd = _connection.CreateCommand();
+            alterCmd.CommandText = "ALTER TABLE SyncedFiles ADD COLUMN CloudContentHash TEXT NULL;";
+            alterCmd.ExecuteNonQuery();
+        }
     }
 
     public async Task<SyncedFileRecord?> FindByLocalPathAsync(string localPath, CancellationToken ct)
     {
         using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT Id, LocalPath, CloudFileId, ContentHash, LocalMtime, CloudModifiedTime, LastSyncedAt, Status FROM SyncedFiles WHERE LocalPath = $localPath";
+        command.CommandText = "SELECT Id, LocalPath, CloudFileId, ContentHash, LocalMtime, CloudModifiedTime, LastSyncedAt, Status, CloudContentHash FROM SyncedFiles WHERE LocalPath = $localPath";
         command.Parameters.AddWithValue("$localPath", localPath);
 
         using var reader = await command.ExecuteReaderAsync(ct);
@@ -81,7 +109,7 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
     public async Task<SyncedFileRecord?> FindByCloudFileIdAsync(string cloudFileId, CancellationToken ct)
     {
         using var command = _connection.CreateCommand();
-        command.CommandText = "SELECT Id, LocalPath, CloudFileId, ContentHash, LocalMtime, CloudModifiedTime, LastSyncedAt, Status FROM SyncedFiles WHERE CloudFileId = $cloudFileId";
+        command.CommandText = "SELECT Id, LocalPath, CloudFileId, ContentHash, LocalMtime, CloudModifiedTime, LastSyncedAt, Status, CloudContentHash FROM SyncedFiles WHERE CloudFileId = $cloudFileId";
         command.Parameters.AddWithValue("$cloudFileId", cloudFileId);
 
         using var reader = await command.ExecuteReaderAsync(ct);
@@ -94,15 +122,16 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
     {
         using var command = _connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO SyncedFiles (LocalPath, CloudFileId, ContentHash, LocalMtime, CloudModifiedTime, LastSyncedAt, Status)
-            VALUES ($localPath, $cloudFileId, $contentHash, $localMtime, $cloudModifiedTime, $lastSyncedAt, $status)
+            INSERT INTO SyncedFiles (LocalPath, CloudFileId, ContentHash, LocalMtime, CloudModifiedTime, LastSyncedAt, Status, CloudContentHash)
+            VALUES ($localPath, $cloudFileId, $contentHash, $localMtime, $cloudModifiedTime, $lastSyncedAt, $status, $cloudContentHash)
             ON CONFLICT (LocalPath) DO UPDATE SET
                 CloudFileId = excluded.CloudFileId,
                 ContentHash = excluded.ContentHash,
                 LocalMtime = excluded.LocalMtime,
                 CloudModifiedTime = excluded.CloudModifiedTime,
                 LastSyncedAt = excluded.LastSyncedAt,
-                Status = excluded.Status
+                Status = excluded.Status,
+                CloudContentHash = excluded.CloudContentHash
             """;
         command.Parameters.AddWithValue("$localPath", record.LocalPath);
         command.Parameters.AddWithValue("$cloudFileId", (object?)record.CloudFileId ?? DBNull.Value);
@@ -111,6 +140,7 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
         command.Parameters.AddWithValue("$cloudModifiedTime", record.CloudModifiedTime.HasValue ? record.CloudModifiedTime.Value.ToUnixTimeMilliseconds() : DBNull.Value);
         command.Parameters.AddWithValue("$lastSyncedAt", record.LastSyncedAt.ToUnixTimeMilliseconds());
         command.Parameters.AddWithValue("$status", record.Status.ToString());
+        command.Parameters.AddWithValue("$cloudContentHash", (object?)record.CloudContentHash ?? DBNull.Value);
 
         await command.ExecuteNonQueryAsync(ct);
     }
@@ -211,7 +241,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
         LocalMtime: DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(4)),
         CloudModifiedTime: reader.IsDBNull(5) ? null : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(5)),
         LastSyncedAt: DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(6)),
-        Status: Enum.Parse<SyncStatus>(reader.GetString(7)));
+        Status: Enum.Parse<SyncStatus>(reader.GetString(7)),
+        CloudContentHash: reader.IsDBNull(8) ? null : reader.GetString(8));
 
     private static SyncQueueItem ReadQueueItem(SqliteDataReader reader) => new(
         Id: reader.GetInt64(0),

@@ -34,7 +34,8 @@ public sealed record SyncedFileRecord(
     DateTimeOffset LocalMtime,
     DateTimeOffset? CloudModifiedTime,
     DateTimeOffset LastSyncedAt,
-    SyncStatus Status);
+    SyncStatus Status,
+    string? CloudContentHash = null);
 
 public enum SyncStatus { Synced, PendingUpload, PendingDownload, Conflict, Failed }
 

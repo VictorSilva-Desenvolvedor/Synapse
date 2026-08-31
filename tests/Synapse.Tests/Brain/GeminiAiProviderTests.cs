@@ -67,13 +67,22 @@ public class GeminiAiProviderTests
     [Fact]
     public async Task ProcessRawNoteAsync_WhenNoApiKey_ShouldUseHeuristicFallback()
     {
-        var config = new BrainConfig { GeminiApiKey = "" };
-        var provider = new GeminiAiProvider(config);
+        var prevEnv = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+        try
+        {
+            Environment.SetEnvironmentVariable("GEMINI_API_KEY", null);
+            var config = new BrainConfig { GeminiApiKey = "" };
+            var provider = new GeminiAiProvider(config);
 
-        var result = await provider.ProcessRawNoteAsync("Anotação Rápida de Teste", ["Nota Existente"]);
+            var result = await provider.ProcessRawNoteAsync("Anotação Rápida de Teste", ["Nota Existente"]);
 
-        result.Title.ShouldBe("Anotação Rápida de Teste");
-        result.Tags.ShouldContain("cerebro");
+            result.Title.ShouldBe("Anotação Rápida de Teste");
+            result.Tags.ShouldContain("cerebro");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GEMINI_API_KEY", prevEnv);
+        }
     }
 
     private class SequenceHttpMessageHandler : HttpMessageHandler

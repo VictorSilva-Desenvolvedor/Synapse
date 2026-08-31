@@ -57,15 +57,18 @@ public class FallbackEmbeddingProviderTests
     }
 
     [Fact]
-    public async Task GenerateEmbeddingAsync_WhenBothFail_PropagatesFallbackException()
+    public async Task GenerateEmbeddingAsync_WhenBothFail_ThrowsCombinedExceptionWithBothErrors()
     {
-        var primary = new StubEmbeddingProvider("gemini", [], new InvalidOperationException("erro primario"));
-        var fallback = new StubEmbeddingProvider("ollama", [], new InvalidOperationException("erro fallback"));
+        var primary = new StubEmbeddingProvider("Gemini-Embeddings", [], new InvalidOperationException("cota excedida"));
+        var fallback = new StubEmbeddingProvider("Ollama-Embeddings", [], new InvalidOperationException("ollama indisponivel"));
         var provider = new FallbackEmbeddingProvider(primary, fallback);
 
         var ex = await Should.ThrowAsync<InvalidOperationException>(
             async () => await provider.GenerateEmbeddingAsync("texto"));
 
-        ex.Message.ShouldBe("erro fallback");
+        ex.Message.ShouldContain("Gemini-Embeddings falhou: cota excedida");
+        ex.Message.ShouldContain("Ollama-Embeddings também falhou: ollama indisponivel");
+        ex.InnerException.ShouldNotBeNull();
+        ex.InnerException.Message.ShouldBe("ollama indisponivel");
     }
 }

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using NSubstitute;
 using Shouldly;
 using Synapse.Brain.Models;
 using Synapse.Brain.Ports;
@@ -85,16 +87,19 @@ public class FallbackAiProviderTests
     }
 
     [Fact]
-    public async Task AskQuestionAsync_WhenBothFail_PropagatesFallbackException()
+    public async Task AskQuestionAsync_WhenBothFail_ThrowsCombinedExceptionWithBothErrors()
     {
-        var primary = new StubAiProvider("primario", new InvalidOperationException("erro primario"));
-        var fallback = new StubAiProvider("fallback", new InvalidOperationException("erro fallback"));
+        var primary = new StubAiProvider("Gemini", new InvalidOperationException("API key expirada ou 429"));
+        var fallback = new StubAiProvider("Ollama", new InvalidOperationException("Conexão recusada em 11434"));
         var provider = new FallbackAiProvider(primary, fallback);
 
         var ex = await Should.ThrowAsync<InvalidOperationException>(
             async () => await provider.AskQuestionAsync("pergunta"));
 
-        ex.Message.ShouldBe("erro fallback");
+        ex.Message.ShouldContain("Gemini falhou: API key expirada ou 429");
+        ex.Message.ShouldContain("Ollama também falhou: Conexão recusada em 11434");
+        ex.InnerException.ShouldNotBeNull();
+        ex.InnerException.Message.ShouldBe("Conexão recusada em 11434");
     }
 
     [Fact]
@@ -107,6 +112,22 @@ public class FallbackAiProviderTests
         var result = await provider.ProcessChatTurnAsync("mensagem", [], [], []);
 
         result.Title.ShouldBe("fallback");
+    }
+
+    [Fact]
+    public async Task ProcessChatTurnAsync_WhenBothFail_ThrowsCombinedExceptionWithBothErrors()
+    {
+        var primary = new StubAiProvider("Gemini", new InvalidOperationException("API key inválida"));
+        var fallback = new StubAiProvider("Ollama", new InvalidOperationException("Ollama offline"));
+        var provider = new FallbackAiProvider(primary, fallback);
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(
+            async () => await provider.ProcessChatTurnAsync("mensagem", [], [], []));
+
+        ex.Message.ShouldContain("Gemini falhou: API key inválida");
+        ex.Message.ShouldContain("Ollama também falhou: Ollama offline");
+        ex.InnerException.ShouldNotBeNull();
+        ex.InnerException.Message.ShouldBe("Ollama offline");
     }
 
     [Fact]
@@ -123,5 +144,23 @@ public class FallbackAiProviderTests
             async () => await provider.AskQuestionAsync("pergunta", cts.Token));
 
         fallback.CallCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task RunWithFallbackAsync_WhenPrimaryFails_LogsWarning()
+    {
+        var primary = new StubAiProvider("Gemini", new InvalidOperationException("timeout"));
+        var fallback = new StubAiProvider("Ollama");
+        var logger = Substitute.For<ILogger>();
+        var provider = new FallbackAiProvider(primary, fallback, logger);
+
+        await provider.AskQuestionAsync("teste");
+
+        logger.ReceivedWithAnyArgs(1).Log(
+            LogLevel.Warning,
+            default,
+            default!,
+            default,
+            default!);
     }
 }

@@ -24,8 +24,13 @@ internal static class BrainProviderFactory
         OllamaEmbeddingModel = string.IsNullOrWhiteSpace(config.OllamaEmbeddingModel) ? "nomic-embed-text" : config.OllamaEmbeddingModel
     };
 
+    public static ILogger DefaultLogger { get; } = GetLogger("Brain");
+
+    public static ILogger GetLogger(string category) => new ActivityLoggerAdapter(category);
+
     public static IBrainAiProvider CreateAiProvider(BrainConfig brainConfig, ILogger? logger = null)
     {
+        logger ??= DefaultLogger;
         var ollama = new OllamaAiProvider(brainConfig);
 
         if (string.IsNullOrWhiteSpace(brainConfig.GetEffectiveGeminiApiKey()))
@@ -39,6 +44,7 @@ internal static class BrainProviderFactory
 
     public static IEmbeddingProvider CreateEmbeddingProvider(BrainConfig brainConfig, ILogger? logger = null)
     {
+        logger ??= DefaultLogger;
         var ollama = new OllamaEmbeddingProvider(brainConfig);
 
         if (string.IsNullOrWhiteSpace(brainConfig.GetEffectiveGeminiApiKey()))
@@ -48,5 +54,44 @@ internal static class BrainProviderFactory
 
         var gemini = new GeminiEmbeddingProvider(brainConfig);
         return new FallbackEmbeddingProvider(gemini, ollama, logger);
+    }
+
+    private sealed class ActivityLoggerAdapter : ILogger
+    {
+        private readonly string _category;
+
+        public ActivityLoggerAdapter(string category)
+        {
+            _category = category;
+        }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel)) return;
+
+            var message = formatter(state, exception);
+            var status = logLevel switch
+            {
+                LogLevel.Error or LogLevel.Critical => "Failed",
+                LogLevel.Warning => "Warning",
+                _ => "Success"
+            };
+
+            _ = Synapse.Core.Logging.SynapseActivityLogger.Instance.LogActionAsync(
+                _category,
+                logLevel.ToString(),
+                details: message,
+                status: status,
+                errorMessage: exception?.Message);
+        }
     }
 }

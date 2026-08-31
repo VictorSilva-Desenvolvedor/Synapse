@@ -417,9 +417,10 @@ public sealed class SynapseTrayApp : IDisposable
             // cai para Ollama local sozinho nesse caso, entao o AskVault remoto continua
             // funcionando (com fallback automatico Gemini->Ollama quando a chave existe).
             var brainConfig = BrainProviderFactory.BuildBrainConfig(config);
+            var brainLogger = BrainProviderFactory.GetLogger("RemoteAgent.Brain");
             IVaultBrainQuery brainQuery = new VaultRagEngine(
-                BrainProviderFactory.CreateEmbeddingProvider(brainConfig),
-                BrainProviderFactory.CreateAiProvider(brainConfig));
+                BrainProviderFactory.CreateEmbeddingProvider(brainConfig, brainLogger),
+                BrainProviderFactory.CreateAiProvider(brainConfig, brainLogger));
 
             var executor = new RemoteCommandExecutor(
                 () => configManager.LoadAsync(),

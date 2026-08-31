@@ -44,7 +44,20 @@ public sealed class FallbackAiProvider : IBrainAiProvider
         {
             _logger?.LogWarning(ex, "Provedor primário ({Primary}) falhou em {Operation}, tentando fallback ({Fallback}).",
                 _primary.ProviderName, operationName, _fallback.ProviderName);
-            return await operation(_fallback);
+            try
+            {
+                return await operation(_fallback);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception fallbackEx)
+            {
+                throw new InvalidOperationException(
+                    $"{_primary.ProviderName} falhou: {ex.Message} | {_fallback.ProviderName} também falhou: {fallbackEx.Message}",
+                    fallbackEx);
+            }
         }
     }
 

@@ -117,10 +117,11 @@ public partial class ChatVaultWindow : PixelWindow
         }
 
         var brainConfig = BrainProviderFactory.BuildBrainConfig(config);
+        var brainLogger = BrainProviderFactory.GetLogger("ChatVault.Brain");
 
         _ragEngine = new VaultRagEngine(
-            BrainProviderFactory.CreateEmbeddingProvider(brainConfig),
-            BrainProviderFactory.CreateAiProvider(brainConfig),
+            BrainProviderFactory.CreateEmbeddingProvider(brainConfig, brainLogger),
+            BrainProviderFactory.CreateAiProvider(brainConfig, brainLogger),
             brainConfig);
 
         StatusText.Text = "Indexando notas do cofre...";

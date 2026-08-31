@@ -37,7 +37,20 @@ public sealed class FallbackEmbeddingProvider : IEmbeddingProvider
         {
             _logger?.LogWarning(ex, "Provedor de embeddings primário ({Primary}) falhou, tentando fallback ({Fallback}).",
                 _primary.ModelName, _fallback.ModelName);
-            return await _fallback.GenerateEmbeddingAsync(text, ct);
+            try
+            {
+                return await _fallback.GenerateEmbeddingAsync(text, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception fallbackEx)
+            {
+                throw new InvalidOperationException(
+                    $"{_primary.ModelName} falhou: {ex.Message} | {_fallback.ModelName} também falhou: {fallbackEx.Message}",
+                    fallbackEx);
+            }
         }
     }
 }

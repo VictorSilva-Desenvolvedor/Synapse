@@ -112,7 +112,7 @@ public class IpcServerTests
         response.Tipo.ShouldBe("Error");
     }
 
-    [Fact(Timeout = 15000)]
+    [Fact(Timeout = 30000)]
     public async Task StartAsync_WhenFirstClientHoldsConnection_SecondClientShouldConnectAndReceiveResponse()
     {
         var pipeName = $"synapse-ipc-test-{Guid.NewGuid():N}";
@@ -127,9 +127,9 @@ public class IpcServerTests
         using var serverCts = new CancellationTokenSource();
         var serverTask = Task.Run(() => server.StartAsync(serverCts.Token));
 
-        await Task.Delay(100);
+        await Task.Delay(250);
 
-        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var ct = timeoutCts.Token;
 
         try

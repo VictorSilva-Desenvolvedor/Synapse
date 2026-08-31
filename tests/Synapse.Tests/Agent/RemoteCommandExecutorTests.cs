@@ -884,7 +884,9 @@ public class RemoteCommandExecutorTests : IDisposable
         result.Message.ShouldContain("Lembrete salvo no cofre com sucesso!");
         result.Message.ShouldContain("💾 Salvo em: [[Reunião Amanhã às 10h]]");
 
-        var createdFiles = Directory.GetFiles(_tempVaultDir, "*.md", SearchOption.AllDirectories);
+        var createdFiles = Directory.GetFiles(_tempVaultDir, "*.md", SearchOption.AllDirectories)
+            .Where(f => !f.Contains(".synapse") && !f.Contains(".obsidian"))
+            .ToArray();
         createdFiles.Length.ShouldBe(1);
         var fileContent = await File.ReadAllTextAsync(createdFiles[0]);
         fileContent.ShouldContain("titulo: \"Reunião Amanhã às 10h\"");

@@ -18,7 +18,7 @@ public sealed class SynapseActivityEntry
     public string LocalTime => Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff");
 
     [JsonPropertyName("appVersion")]
-    public string AppVersion { get; set; } = "1.0.0";
+    public string AppVersion { get; set; } = "1.1.0";
 
     [JsonPropertyName("component")]
     public string Component { get; set; } = "General";

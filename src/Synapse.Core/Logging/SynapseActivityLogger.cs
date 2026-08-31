@@ -41,7 +41,7 @@ public sealed class SynapseActivityLogger
 
         _appVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString()
                       ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
-                      ?? "1.0.0";
+                      ?? "1.1.0";
 
         try
         {

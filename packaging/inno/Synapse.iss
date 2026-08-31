@@ -1,6 +1,6 @@
 ; Script do Inno Setup para o instalador do Synapse (V3.1, ADR-013)
 #define MyAppName "Synapse"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppPublisher "Victor Silva"
 #define MyAppURL "https://github.com/VictorSilva-Desenvolvedor/Synapse"
 #define MyAppExeName "Synapse.Tray.exe"

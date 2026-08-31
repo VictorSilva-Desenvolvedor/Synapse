@@ -1,0 +1,15 @@
+PackageIdentifier: VictorSilva.Synapse
+PackageVersion: 1.1.1
+MinimumOSVersion: 10.0.17763.0
+InstallerType: inno
+InstallModes:
+  - interactive
+  - silent
+  - silentWithProgress
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/VictorSilva-Desenvolvedor/Synapse/releases/download/v1.1.1/Synapse-Setup-1.1.1.exe
+    InstallerSha256: 6916EA2A2250C8287083906962EF9726B62B6186A9DF69BDA0943E2B1CC852BB
+    Scope: machine
+ManifestType: installer
+ManifestVersion: 1.6.0

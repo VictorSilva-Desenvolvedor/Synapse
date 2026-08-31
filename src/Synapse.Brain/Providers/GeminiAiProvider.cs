@@ -19,19 +19,25 @@ namespace Synapse.Brain.Providers;
 public sealed class GeminiAiProvider : IBrainAiProvider
 {
     private readonly HttpClient _httpClient;
+    private readonly HttpClient _chatHttpClient;
     private readonly BrainConfig _config;
 
     public string ProviderName => "Google Gemini (Free Tier)";
 
-    public GeminiAiProvider(BrainConfig config, HttpClient? httpClient = null)
+    internal TimeSpan GeneralTimeout => _httpClient.Timeout;
+    internal TimeSpan ChatTimeout => _chatHttpClient.Timeout;
+
+    public GeminiAiProvider(BrainConfig config, HttpClient? httpClient = null, HttpClient? chatHttpClient = null)
     {
         _config = config;
-        // Timeout explicito e curto (padrao do HttpClient e 100s): quando este provedor e
-        // usado dentro do FallbackAiProvider, um Gemini que trava LENTO em vez de falhar
-        // rapido (ex.: 429) consome o orcamento de tempo inteiro antes do Ollama sequer
-        // ser tentado - o PWA remoto tem timeout fixo de 65-75s do lado do celular, entao
-        // um Gemini "so devagar" e pior que um Gemini que erra na hora.
+        // Timeout explicito de 20s para operacoes rapidas (Quick Capture, MOC, AskQuestion, RefineAnswer).
         _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+
+        // Timeout dedicado de 45s para o fluxo de Chat (ProcessChatTurnAsync):
+        // o prompt de chat RAG inclui contexto de cofre, historico e schema JSON estruturado,
+        // o que em modelos como gemini-3.6-flash pode levar >20s (ex.: ~25s), mas ainda responder
+        // com sucesso antes dos 45s.
+        _chatHttpClient = chatHttpClient ?? (httpClient != null ? httpClient : new HttpClient { Timeout = TimeSpan.FromSeconds(45) });
     }
 
     public async Task<AiStructuredNote> ProcessRawNoteAsync(
@@ -400,7 +406,7 @@ Mensagem do usuário:
             try
             {
                 var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
-                var response = await _httpClient.PostAsync(url, content, ct);
+                var response = await _chatHttpClient.PostAsync(url, content, ct);
 
                 if (response.IsSuccessStatusCode)
                 {

@@ -11,6 +11,7 @@ public class GeminiAiProviderTests
     {
         private readonly string _responseContent;
         private readonly HttpStatusCode _statusCode;
+        public int CallCount { get; private set; }
 
         public MockHttpMessageHandler(string responseContent, HttpStatusCode statusCode = HttpStatusCode.OK)
         {
@@ -20,6 +21,7 @@ public class GeminiAiProviderTests
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            CallCount++;
             var response = new HttpResponseMessage(_statusCode)
             {
                 Content = new StringContent(_responseContent, System.Text.Encoding.UTF8, "application/json")
@@ -332,5 +334,42 @@ public class GeminiAiProviderTests
 
         handler.CallCount.ShouldBe(2);
         ex.Message.ShouldNotContain(secretMessage);
+    }
+
+    [Fact]
+    public void GeminiAiProvider_DefaultTimeouts_ShouldHave20sGeneralAnd45sChatTimeout()
+    {
+        var config = new BrainConfig();
+        var provider = new GeminiAiProvider(config);
+
+        provider.GeneralTimeout.ShouldBe(TimeSpan.FromSeconds(20));
+        provider.ChatTimeout.ShouldBe(TimeSpan.FromSeconds(45));
+    }
+
+    [Fact]
+    public async Task ProcessChatTurnAsync_UsesDedicatedChatHttpClient_WhileOtherMethodsUseGeneralClient()
+    {
+        var chatHandler = new MockHttpMessageHandler(@"{
+  ""candidates"": [
+    { ""content"": { ""parts"": [ { ""text"": ""{\""shouldCapture\"": false, \""title\"": null, \""category\"": null, \""tags\"": [], \""bodyMarkdown\"": null, \""keyPoints\"": [], \""suggestedConnections\"": [], \""shouldAnswer\"": false, \""replyMessage\"": \""chat-ok\""}"" } ] } }
+  ]
+}");
+        var generalHandler = new MockHttpMessageHandler(ValidTextResponse);
+
+        var generalClient = new HttpClient(generalHandler) { Timeout = TimeSpan.FromSeconds(20) };
+        var chatClient = new HttpClient(chatHandler) { Timeout = TimeSpan.FromSeconds(45) };
+
+        var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-3.6-flash" };
+        var provider = new GeminiAiProvider(config, generalClient, chatClient);
+
+        var chatResult = await provider.ProcessChatTurnAsync("oi", [], [], []);
+        chatResult.ReplyMessage.ShouldBe("chat-ok");
+        chatHandler.CallCount.ShouldBe(1);
+        generalHandler.CallCount.ShouldBe(0);
+
+        var askResult = await provider.AskQuestionAsync("duvida");
+        askResult.ShouldBe("Resposta de teste em Markdown.");
+        generalHandler.CallCount.ShouldBe(1);
+        chatHandler.CallCount.ShouldBe(1);
     }
 }

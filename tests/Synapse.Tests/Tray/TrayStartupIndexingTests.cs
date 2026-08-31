@@ -1,4 +1,6 @@
+using NSubstitute;
 using Shouldly;
+using Synapse.Brain.Ports;
 using Synapse.Brain.Services;
 using Synapse.Sync.Config;
 using Synapse.Tests.UI;
@@ -43,12 +45,19 @@ public class TrayStartupIndexingTests : IDisposable
         };
         await configManager.SaveAsync(config);
 
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 0.1f, 0.2f }));
+        var mockAi = Substitute.For<IBrainAiProvider>();
+
         SynapseTrayApp? app = null;
         try
         {
             await _fixture.Invoke(async () =>
             {
-                app = new SynapseTrayApp(configManager: configManager);
+                app = new SynapseTrayApp(
+                    configManager: configManager,
+                    ragEngineFactory: cfg => new VaultRagEngine(mockEmbedding, mockAi, cfg));
                 await app.CheckInitialOnboardingAsync();
             });
 
@@ -70,6 +79,10 @@ public class TrayStartupIndexingTests : IDisposable
             loaded.ShouldNotBeNull("O índice em disco deveria ter sido criado pela indexação proativa.");
             loaded.ContainsKey("NotaInicial.md").ShouldBeTrue("A nota 'NotaInicial.md' deveria ter sido indexada no startup.");
             loaded["NotaInicial.md"].Tokens.ShouldContain("notainicial");
+
+            await mockEmbedding.Received().GenerateEmbeddingAsync(
+                Arg.Is<string>(s => s.Contains("Conteúdo da nota inicial")),
+                Arg.Any<CancellationToken>());
         }
         finally
         {

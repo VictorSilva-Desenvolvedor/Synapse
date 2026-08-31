@@ -55,17 +55,29 @@ public sealed class SynapseTrayApp : IDisposable
     private readonly CancellationTokenSource _remoteAgentCts = new();
     private readonly Dispatcher _dispatcher;
     private readonly SynapseConfigManager _configManager;
+    private readonly Func<BrainConfig, VaultRagEngine> _ragEngineFactory;
 
     private IpcStatusPayload? _currentStatus;
     private OnboardingWindow? _settingsWindow;
     private bool _isDisposed;
     private (string Estado, bool Pausado)? _currentIconState;
 
-    public SynapseTrayApp(IpcClient? ipcClient = null, SynapseConfigManager? configManager = null)
+    public SynapseTrayApp(
+        IpcClient? ipcClient = null,
+        SynapseConfigManager? configManager = null,
+        Func<BrainConfig, VaultRagEngine>? ragEngineFactory = null)
     {
         _dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
         _ipcClient = ipcClient ?? new IpcClient();
         _configManager = configManager ?? new SynapseConfigManager();
+        _ragEngineFactory = ragEngineFactory ?? (cfg =>
+        {
+            var brainLogger = BrainProviderFactory.GetLogger("Brain");
+            return new VaultRagEngine(
+                BrainProviderFactory.CreateEmbeddingProvider(cfg, brainLogger),
+                BrainProviderFactory.CreateAiProvider(cfg, brainLogger),
+                cfg);
+        });
 
         PixelWindow.EnsureTheme();
 
@@ -386,11 +398,7 @@ public sealed class SynapseTrayApp : IDisposable
         if (!string.IsNullOrWhiteSpace(config.VaultPath) && Directory.Exists(config.VaultPath))
         {
             var brainConfig = BrainProviderFactory.BuildBrainConfig(config);
-            var brainLogger = BrainProviderFactory.GetLogger("Brain");
-            sharedRagEngine = new VaultRagEngine(
-                BrainProviderFactory.CreateEmbeddingProvider(brainConfig, brainLogger),
-                BrainProviderFactory.CreateAiProvider(brainConfig, brainLogger),
-                brainConfig);
+            sharedRagEngine = _ragEngineFactory(brainConfig);
 
             _ = Task.Run(async () =>
             {
@@ -460,11 +468,7 @@ public sealed class SynapseTrayApp : IDisposable
             // Reutiliza o motor de RAG já instanciado no startup (evita duplicar instâncias em memória)
             // ou constrói um novo se não tiver sido fornecido
             var brainConfig = BrainProviderFactory.BuildBrainConfig(config);
-            var brainLogger = BrainProviderFactory.GetLogger("RemoteAgent.Brain");
-            IVaultBrainQuery brainQuery = sharedRagEngine ?? new VaultRagEngine(
-                BrainProviderFactory.CreateEmbeddingProvider(brainConfig, brainLogger),
-                BrainProviderFactory.CreateAiProvider(brainConfig, brainLogger),
-                brainConfig);
+            IVaultBrainQuery brainQuery = sharedRagEngine ?? _ragEngineFactory(brainConfig);
 
             var executor = new RemoteCommandExecutor(
                 () => configManager.LoadAsync(),

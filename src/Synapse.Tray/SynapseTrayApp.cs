@@ -51,18 +51,21 @@ public sealed class SynapseTrayApp : IDisposable
     private readonly MenuItem _pauseResumeItem;
     private readonly MenuItem _remoteControlItem;
     private readonly DispatcherTimer _pollTimer;
+    private readonly DispatcherTimer _iconReaffirmTimer;
     private readonly CancellationTokenSource _remoteAgentCts = new();
     private readonly Dispatcher _dispatcher;
+    private readonly SynapseConfigManager _configManager;
 
     private IpcStatusPayload? _currentStatus;
     private OnboardingWindow? _settingsWindow;
     private bool _isDisposed;
     private (string Estado, bool Pausado)? _currentIconState;
 
-    public SynapseTrayApp(IpcClient? ipcClient = null)
+    public SynapseTrayApp(IpcClient? ipcClient = null, SynapseConfigManager? configManager = null)
     {
         _dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
         _ipcClient = ipcClient ?? new IpcClient();
+        _configManager = configManager ?? new SynapseConfigManager();
 
         PixelWindow.EnsureTheme();
 
@@ -148,17 +151,22 @@ public sealed class SynapseTrayApp : IDisposable
         // poll (repetir a cada 2.5s faria um DELETE+ADD real do icone pra sempre, causando
         // flicker visivel e cortando balloon tips antes da hora). Reinicio do Explorer ja e
         // tratado internamente pelo NotifyIcon do WinForms (mensagem TaskbarCreated).
-        var iconReaffirmTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
+        _iconReaffirmTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
             Interval = TimeSpan.FromSeconds(5)
         };
-        iconReaffirmTimer.Tick += (sender, _) =>
+        _iconReaffirmTimer.Tick += (sender, _) =>
         {
             ((DispatcherTimer)sender!).Stop();
-            _notifyIcon.Visible = false;
-            _notifyIcon.Visible = true;
+            if (_isDisposed) return;
+            try
+            {
+                _notifyIcon.Visible = false;
+                _notifyIcon.Visible = true;
+            }
+            catch { }
         };
-        iconReaffirmTimer.Start();
+        _iconReaffirmTimer.Start();
 
         _dispatcher.BeginInvoke(async () => await CheckInitialOnboardingAsync());
     }
@@ -359,26 +367,62 @@ public sealed class SynapseTrayApp : IDisposable
         _remoteControlItem.IsChecked = enabled;
     }
 
-    private async Task CheckInitialOnboardingAsync()
+    internal async Task CheckInitialOnboardingAsync()
     {
         await PollStatusAsync();
 
-        var configManager = new SynapseConfigManager();
-        var config = await configManager.LoadAsync();
+        var config = await _configManager.LoadAsync();
 
         ApplyRemoteControlState(config.RemoteControlEnabled);
 
         if (!config.IsConfigured)
         {
             OpenSettings();
+            return;
         }
-        else
+
+        // Se o cofre estiver configurado, cria o motor de RAG e dispara a indexação proativa em background
+        VaultRagEngine? sharedRagEngine = null;
+        if (!string.IsNullOrWhiteSpace(config.VaultPath) && Directory.Exists(config.VaultPath))
         {
-            _ = StartRemoteAgentAsync(config);
+            var brainConfig = BrainProviderFactory.BuildBrainConfig(config);
+            var brainLogger = BrainProviderFactory.GetLogger("Brain");
+            sharedRagEngine = new VaultRagEngine(
+                BrainProviderFactory.CreateEmbeddingProvider(brainConfig, brainLogger),
+                BrainProviderFactory.CreateAiProvider(brainConfig, brainLogger),
+                brainConfig);
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    _ = SynapseActivityLogger.Instance.LogActionAsync(
+                        "Brain",
+                        "StartIndexing",
+                        $"Iniciando indexacao proativa do cofre em background: {config.VaultPath}");
+
+                    await sharedRagEngine.IndexVaultAsync(config.VaultPath, _remoteAgentCts.Token);
+
+                    _ = SynapseActivityLogger.Instance.LogActionAsync(
+                        "Brain",
+                        "IndexCompleted",
+                        $"Indexacao proativa em background concluida para: {config.VaultPath}");
+                }
+                catch (Exception ex)
+                {
+                    _ = SynapseActivityLogger.Instance.LogActionAsync(
+                        "Brain",
+                        "IndexFailed",
+                        status: "Failed",
+                        errorMessage: ex.Message);
+                }
+            }, _remoteAgentCts.Token);
         }
+
+        _ = StartRemoteAgentAsync(config, sharedRagEngine);
     }
 
-    private async Task StartRemoteAgentAsync(SynapseConfig config)
+    private async Task StartRemoteAgentAsync(SynapseConfig config, VaultRagEngine? sharedRagEngine = null)
     {
         try
         {
@@ -413,31 +457,14 @@ public sealed class SynapseTrayApp : IDisposable
             var confirmationPrompt = new WpfConfirmationPrompt(_dispatcher);
             var uiAutomation = new WindowsUiAutomationAdapter();
 
-            // Constroi o brainQuery mesmo sem chave Gemini configurada: o BrainProviderFactory
-            // cai para Ollama local sozinho nesse caso, entao o AskVault remoto continua
-            // funcionando (com fallback automatico Gemini->Ollama quando a chave existe).
+            // Reutiliza o motor de RAG já instanciado no startup (evita duplicar instâncias em memória)
+            // ou constrói um novo se não tiver sido fornecido
             var brainConfig = BrainProviderFactory.BuildBrainConfig(config);
             var brainLogger = BrainProviderFactory.GetLogger("RemoteAgent.Brain");
-            var ragEngine = new VaultRagEngine(
+            IVaultBrainQuery brainQuery = sharedRagEngine ?? new VaultRagEngine(
                 BrainProviderFactory.CreateEmbeddingProvider(brainConfig, brainLogger),
-                BrainProviderFactory.CreateAiProvider(brainConfig, brainLogger));
-            IVaultBrainQuery brainQuery = ragEngine;
-
-            if (!string.IsNullOrWhiteSpace(config.VaultPath) && Directory.Exists(config.VaultPath))
-            {
-                // Indexação proativa em background: aquece o cache persistido do cofre logo no startup
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await ragEngine.IndexVaultAsync(config.VaultPath, _remoteAgentCts.Token);
-                    }
-                    catch
-                    {
-                        // Falha silenciosa na indexação proativa em background não afeta o app
-                    }
-                }, _remoteAgentCts.Token);
-            }
+                BrainProviderFactory.CreateAiProvider(brainConfig, brainLogger),
+                brainConfig);
 
             var executor = new RemoteCommandExecutor(
                 () => configManager.LoadAsync(),
@@ -533,6 +560,7 @@ public sealed class SynapseTrayApp : IDisposable
         _isDisposed = true;
 
         _pollTimer.Stop();
+        _iconReaffirmTimer.Stop();
         _notifyIcon.Visible = false;
         var lastIcon = _notifyIcon.Icon;
         _notifyIcon.Dispose();

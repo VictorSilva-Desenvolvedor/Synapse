@@ -21,16 +21,21 @@ public sealed class LocalHttpClipperServer : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _listenerTask;
 
+    public int Port { get; }
+    public bool IsRunning => _listener.IsListening;
+
     public LocalHttpClipperServer(
         WebClipperService clipperService,
         SynapseConfigManager configManager,
-        ILogger<LocalHttpClipperServer>? logger = null)
+        ILogger<LocalHttpClipperServer>? logger = null,
+        int port = DefaultPort)
     {
         _clipperService = clipperService;
         _configManager = configManager;
         _logger = logger;
+        Port = port;
         _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://127.0.0.1:{DefaultPort}/");
+        _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
     }
 
     public void Start()

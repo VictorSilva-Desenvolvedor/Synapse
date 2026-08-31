@@ -212,10 +212,12 @@ public class RealE2EVerificationTests : IDisposable
             Repository = TestRepo
         });
 
-        using var httpClipperServer = new LocalHttpClipperServer(clipperService, configManager);
+        var testPort = 57425;
+        using var httpClipperServer = new LocalHttpClipperServer(clipperService, configManager, port: testPort);
         httpClipperServer.Start();
+        httpClipperServer.IsRunning.ShouldBeTrue();
 
-        // Envia requisição HTTP real para http://127.0.0.1:57412/clip
+        // Envia requisição HTTP real para http://127.0.0.1:{testPort}/clip
         using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         var clipPayload = new
         {
@@ -224,10 +226,23 @@ public class RealE2EVerificationTests : IDisposable
             content = "<h1>Título do Artigo</h1><p>Conteúdo real capturado pelo clipper.</p>"
         };
 
-        var clipResponse = await httpClient.PostAsync(
-            "http://127.0.0.1:57412/clip",
-            new StringContent(JsonSerializer.Serialize(clipPayload), Encoding.UTF8, "application/json"));
+        HttpResponseMessage? clipResponse = null;
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                clipResponse = await httpClient.PostAsync(
+                    $"http://127.0.0.1:{testPort}/clip",
+                    new StringContent(JsonSerializer.Serialize(clipPayload), Encoding.UTF8, "application/json"));
+                if (clipResponse.IsSuccessStatusCode) break;
+            }
+            catch (HttpRequestException) when (attempt < 4)
+            {
+                await Task.Delay(100);
+            }
+        }
 
+        clipResponse.ShouldNotBeNull();
         clipResponse.IsSuccessStatusCode.ShouldBeTrue();
         var clipResultJson = await clipResponse.Content.ReadAsStringAsync();
         clipResultJson.ShouldContain("success\":true");

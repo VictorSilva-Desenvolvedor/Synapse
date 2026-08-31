@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Synapse.Brain.Models;
 using Synapse.Brain.Ports;
 
@@ -13,13 +14,19 @@ public sealed class VaultRagEngine : IVaultBrainQuery
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly IBrainAiProvider _aiProvider;
     private readonly BrainConfig _config;
+    private readonly IVaultIndexStore _indexStore;
     private readonly Dictionary<string, NoteEmbeddingEntry> _index = new(StringComparer.OrdinalIgnoreCase);
 
-    public VaultRagEngine(IEmbeddingProvider embeddingProvider, IBrainAiProvider aiProvider, BrainConfig? config = null)
+    public VaultRagEngine(
+        IEmbeddingProvider embeddingProvider,
+        IBrainAiProvider aiProvider,
+        BrainConfig? config = null,
+        IVaultIndexStore? indexStore = null)
     {
         _embeddingProvider = embeddingProvider;
         _aiProvider = aiProvider;
         _config = config ?? new BrainConfig();
+        _indexStore = indexStore ?? new FileVaultIndexStore();
     }
 
     public async Task IndexVaultAsync(string vaultRootPath, CancellationToken ct = default)
@@ -29,32 +36,91 @@ public sealed class VaultRagEngine : IVaultBrainQuery
             return;
         }
 
+        if (_index.Count == 0)
+        {
+            var loaded = await _indexStore.LoadAsync(vaultRootPath, ct);
+            if (loaded != null)
+            {
+                foreach (var (k, v) in loaded)
+                {
+                    _index[k] = v;
+                }
+            }
+        }
+
         var files = Directory.GetFiles(vaultRootPath, "*.md", SearchOption.AllDirectories)
             .Where(f => !f.Contains(".obsidian") && !f.Contains("_conflitos") && !f.Contains(".trash"))
             .ToList();
 
+        var currentRelativePaths = new HashSet<string>(
+            files.Select(f => Path.GetRelativePath(vaultRootPath, f).Replace('\\', '/')),
+            StringComparer.OrdinalIgnoreCase);
+
+        var removedAny = false;
+        var staleKeys = _index.Keys.Where(k => !currentRelativePaths.Contains(k)).ToList();
+        foreach (var staleKey in staleKeys)
+        {
+            _index.Remove(staleKey);
+            removedAny = true;
+        }
+
+        var toIndex = new List<(string FilePath, string RelativePath, string Text, string Hash)>();
         foreach (var file in files)
         {
             if (ct.IsCancellationRequested) break;
 
+            var relativePath = Path.GetRelativePath(vaultRootPath, file).Replace('\\', '/');
+            string text;
             try
             {
-                var relativePath = Path.GetRelativePath(vaultRootPath, file).Replace('\\', '/');
-                var text = await File.ReadAllTextAsync(file, ct);
-                var hash = ComputeSha256(text);
-
-                if (_index.TryGetValue(relativePath, out var existing) && existing.ContentHash == hash)
-                {
-                    continue; // Já indexado e inalterado
-                }
-
-                var vector = await _embeddingProvider.GenerateEmbeddingAsync(text, ct);
-                _index[relativePath] = new NoteEmbeddingEntry(relativePath, hash, vector, DateTimeOffset.UtcNow);
+                text = await File.ReadAllTextAsync(file, ct);
             }
             catch
             {
-                // Ignora falha em arquivo individual bloqueado
+                continue;
             }
+
+            var hash = ComputeSha256(text);
+            if (_index.TryGetValue(relativePath, out var existing) && existing.ContentHash == hash)
+            {
+                continue; // Já indexado e inalterado
+            }
+
+            toIndex.Add((file, relativePath, text, hash));
+        }
+
+        if (toIndex.Count > 0)
+        {
+            using var semaphore = new SemaphoreSlim(4);
+            var tasks = toIndex.Select(async item =>
+            {
+                await semaphore.WaitAsync(ct);
+                try
+                {
+                    var vector = await _embeddingProvider.GenerateEmbeddingAsync(item.Text, ct);
+                    var title = Path.GetFileNameWithoutExtension(item.RelativePath);
+                    var tokens = Tokenize(title, item.Text);
+                    lock (_index)
+                    {
+                        _index[item.RelativePath] = new NoteEmbeddingEntry(item.RelativePath, item.Hash, vector, DateTimeOffset.UtcNow, tokens);
+                    }
+                }
+                catch
+                {
+                    // Ignora falha em arquivo individual bloqueado
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);
+        }
+
+        if (toIndex.Count > 0 || removedAny)
+        {
+            await _indexStore.SaveAsync(vaultRootPath, _index, ct);
         }
     }
 
@@ -71,15 +137,71 @@ public sealed class VaultRagEngine : IVaultBrainQuery
             await IndexVaultAsync(vaultRootPath, ct);
         }
 
+        if (_index.Count == 0) return [];
+
         var queryVector = await _embeddingProvider.GenerateEmbeddingAsync(query, ct);
-        var results = new List<SemanticSearchResult>();
+        var queryTokens = Tokenize(query);
+
+        var entriesWithScores = new List<(string RelativePath, string Title, NoteEmbeddingEntry Entry, float SemanticSimilarity, float LexicalScore)>();
 
         foreach (var (relativePath, entry) in _index)
         {
-            var similarity = VectorMath.CosineSimilarity(queryVector, entry.Vector);
+            var semanticSim = VectorMath.CosineSimilarity(queryVector, entry.Vector);
             var title = Path.GetFileNameWithoutExtension(relativePath);
+            var titleTokens = Tokenize(title);
+            var titleTokenSet = new HashSet<string>(titleTokens, StringComparer.OrdinalIgnoreCase);
+            var noteTokenSet = new HashSet<string>(entry.Tokens ?? [], StringComparer.OrdinalIgnoreCase);
 
-            var fullPath = Path.Combine(vaultRootPath, relativePath);
+            float lexicalScore = 0f;
+            if (queryTokens.Count > 0)
+            {
+                float matchedWeight = 0f;
+                foreach (var qt in queryTokens)
+                {
+                    if (titleTokenSet.Contains(qt))
+                    {
+                        matchedWeight += 3.0f; // Peso maior para match no título
+                    }
+                    else if (noteTokenSet.Contains(qt))
+                    {
+                        matchedWeight += 1.0f;
+                    }
+                }
+                lexicalScore = matchedWeight / (queryTokens.Count * 3.0f);
+            }
+
+            entriesWithScores.Add((relativePath, title, entry, semanticSim, lexicalScore));
+        }
+
+        // 1. Ranking Semântico (1-indexed)
+        var semanticRanking = entriesWithScores
+            .OrderByDescending(e => e.SemanticSimilarity)
+            .Select((item, idx) => (item.RelativePath, Rank: idx + 1))
+            .ToDictionary(x => x.RelativePath, x => x.Rank, StringComparer.OrdinalIgnoreCase);
+
+        // 2. Ranking Léxico (apenas para quem tem score léxico > 0)
+        var lexicalRanking = entriesWithScores
+            .Where(e => e.LexicalScore > 0)
+            .OrderByDescending(e => e.LexicalScore)
+            .Select((item, idx) => (item.RelativePath, Rank: idx + 1))
+            .ToDictionary(x => x.RelativePath, x => x.Rank, StringComparer.OrdinalIgnoreCase);
+
+        // 3. Reciprocal Rank Fusion (RRF): score = 1/(60 + rank_sem) + (has_lex ? 1/(60 + rank_lex) : 0)
+        const float k = 60f;
+        var fusedResults = new List<SemanticSearchResult>();
+
+        foreach (var item in entriesWithScores)
+        {
+            var semRank = semanticRanking[item.RelativePath];
+            var semScore = 1f / (k + semRank);
+
+            var lexScore = lexicalRanking.TryGetValue(item.RelativePath, out var lexRank)
+                ? 1f / (k + lexRank)
+                : 0f;
+
+            var finalScore = semScore + lexScore;
+
+            var fullPath = Path.Combine(vaultRootPath, item.RelativePath);
             var excerpt = "";
             if (File.Exists(fullPath))
             {
@@ -91,10 +213,10 @@ public sealed class VaultRagEngine : IVaultBrainQuery
                 catch { }
             }
 
-            results.Add(new SemanticSearchResult(relativePath, title, excerpt, similarity));
+            fusedResults.Add(new SemanticSearchResult(item.RelativePath, item.Title, excerpt, finalScore));
         }
 
-        return results
+        return fusedResults
             .OrderByDescending(r => r.SimilarityScore)
             .Take(topK)
             .ToList();
@@ -272,7 +394,13 @@ Pergunta do usuário:
                     var noteContent = await File.ReadAllTextAsync(fullSavedPath, ct);
                     var vector = await _embeddingProvider.GenerateEmbeddingAsync(noteContent, ct);
                     var hash = ComputeSha256(noteContent);
-                    _index[savedNotePath] = new NoteEmbeddingEntry(savedNotePath, hash, vector, DateTimeOffset.UtcNow);
+                    var title = Path.GetFileNameWithoutExtension(savedNotePath);
+                    var tokens = Tokenize(title, noteContent);
+                    lock (_index)
+                    {
+                        _index[savedNotePath] = new NoteEmbeddingEntry(savedNotePath, hash, vector, DateTimeOffset.UtcNow, tokens);
+                    }
+                    await _indexStore.SaveAsync(vaultRootPath, _index, ct);
                 }
                 catch
                 {
@@ -287,6 +415,42 @@ Pergunta do usuário:
             : [];
 
         return new ChatTurnOutcome(turnResult.ReplyMessage, savedNotePath, sources);
+    }
+
+    public static List<string> Tokenize(params string[] inputs)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var input in inputs)
+        {
+            if (string.IsNullOrWhiteSpace(input)) continue;
+            var normalized = RemoveDiacritics(input.ToLowerInvariant());
+            var parts = Regex.Split(normalized, @"[^\p{L}\p{Nd}]+");
+            foreach (var part in parts)
+            {
+                var trimmed = part.Trim();
+                if (!string.IsNullOrWhiteSpace(trimmed))
+                {
+                    set.Add(trimmed);
+                }
+            }
+        }
+        return [.. set];
+    }
+
+    public static string RemoveDiacritics(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        var normalizedString = text.Normalize(NormalizationForm.FormD);
+        var stringBuilder = new StringBuilder(normalizedString.Length);
+        foreach (var c in normalizedString)
+        {
+            var unicodeCategory = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
+            if (unicodeCategory != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                stringBuilder.Append(c);
+            }
+        }
+        return stringBuilder.ToString().Normalize(NormalizationForm.FormC);
     }
 
     private static string BuildAnswerNote(RagAnswer answer)

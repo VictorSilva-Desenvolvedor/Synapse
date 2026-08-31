@@ -418,9 +418,26 @@ public sealed class SynapseTrayApp : IDisposable
             // funcionando (com fallback automatico Gemini->Ollama quando a chave existe).
             var brainConfig = BrainProviderFactory.BuildBrainConfig(config);
             var brainLogger = BrainProviderFactory.GetLogger("RemoteAgent.Brain");
-            IVaultBrainQuery brainQuery = new VaultRagEngine(
+            var ragEngine = new VaultRagEngine(
                 BrainProviderFactory.CreateEmbeddingProvider(brainConfig, brainLogger),
                 BrainProviderFactory.CreateAiProvider(brainConfig, brainLogger));
+            IVaultBrainQuery brainQuery = ragEngine;
+
+            if (!string.IsNullOrWhiteSpace(config.VaultPath) && Directory.Exists(config.VaultPath))
+            {
+                // Indexação proativa em background: aquece o cache persistido do cofre logo no startup
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await ragEngine.IndexVaultAsync(config.VaultPath, _remoteAgentCts.Token);
+                    }
+                    catch
+                    {
+                        // Falha silenciosa na indexação proativa em background não afeta o app
+                    }
+                }, _remoteAgentCts.Token);
+            }
 
             var executor = new RemoteCommandExecutor(
                 () => configManager.LoadAsync(),

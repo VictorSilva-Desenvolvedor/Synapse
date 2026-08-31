@@ -4,7 +4,11 @@ public sealed record NoteEmbeddingEntry(
     string RelativePath,
     string ContentHash,
     float[] Vector,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    IReadOnlyList<string>? Tokens = null)
+{
+    public IReadOnlyList<string> Tokens { get; init; } = Tokens ?? [];
+}
 
 public sealed record SemanticSearchResult(
     string RelativePath,

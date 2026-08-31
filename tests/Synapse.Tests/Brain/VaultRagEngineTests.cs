@@ -269,6 +269,130 @@ public class VaultRagEngineTests : IDisposable
         Path.GetFileName(files[0]).ShouldBe("Demanda.md");
     }
 
+    [Fact]
+    public async Task IndexVaultAsync_WhenPersistedIndexExists_LoadsFromDiskAndSkipsEmbeddingCalls()
+    {
+        var tempIndexDir = Path.Combine(Path.GetTempPath(), $"synapse-idx-shared-{Guid.NewGuid():N}");
+        try
+        {
+            var note1Path = Path.Combine(_tempVaultDir, "Nota1.md");
+            var note2Path = Path.Combine(_tempVaultDir, "Nota2.md");
+            await File.WriteAllTextAsync(note1Path, "Conteúdo da primeira nota.");
+            await File.WriteAllTextAsync(note2Path, "Conteúdo da segunda nota.");
+
+            var store1 = new FileVaultIndexStore(tempIndexDir);
+            var mockEmbedding1 = Substitute.For<IEmbeddingProvider>();
+            mockEmbedding1.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(new float[] { 0.1f, 0.2f }));
+
+            var mockAi = Substitute.For<IBrainAiProvider>();
+
+            var engine1 = new VaultRagEngine(mockEmbedding1, mockAi, indexStore: store1);
+            await engine1.IndexVaultAsync(_tempVaultDir);
+
+            await mockEmbedding1.Received(2).GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+
+            // Segunda instância (ex.: ChatVaultWindow ou reinício do app) usando o mesmo index store
+            var store2 = new FileVaultIndexStore(tempIndexDir);
+            var mockEmbedding2 = Substitute.For<IEmbeddingProvider>();
+            var engine2 = new VaultRagEngine(mockEmbedding2, mockAi, indexStore: store2);
+
+            await engine2.IndexVaultAsync(_tempVaultDir);
+
+            // Nenhuma chamada nova de embedding deve ser feita pois as notas já estão salvas e com mesmo hash
+            await mockEmbedding2.DidNotReceiveWithAnyArgs().GenerateEmbeddingAsync(default!, default);
+
+            var searchResults = await engine2.SearchAsync("primeira", _tempVaultDir);
+            searchResults.Count.ShouldBeGreaterThan(0);
+            searchResults[0].Title.ShouldBe("Nota1");
+        }
+        finally
+        {
+            if (Directory.Exists(tempIndexDir))
+            {
+                try { Directory.Delete(tempIndexDir, true); } catch { }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task IndexVaultAsync_WhenOneNoteModified_OnlyReindexesModifiedNote()
+    {
+        var tempIndexDir = Path.Combine(Path.GetTempPath(), $"synapse-idx-diff-{Guid.NewGuid():N}");
+        try
+        {
+            var noteAPath = Path.Combine(_tempVaultDir, "NotaA.md");
+            var noteBPath = Path.Combine(_tempVaultDir, "NotaB.md");
+            await File.WriteAllTextAsync(noteAPath, "Conteúdo original da Nota A.");
+            await File.WriteAllTextAsync(noteBPath, "Conteúdo original da Nota B.");
+
+            var store = new FileVaultIndexStore(tempIndexDir);
+            var mockEmbedding1 = Substitute.For<IEmbeddingProvider>();
+            mockEmbedding1.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(new float[] { 0.1f, 0.2f }));
+
+            var mockAi = Substitute.For<IBrainAiProvider>();
+            var engine1 = new VaultRagEngine(mockEmbedding1, mockAi, indexStore: store);
+            await engine1.IndexVaultAsync(_tempVaultDir);
+
+            // Modifica apenas a Nota B
+            await File.WriteAllTextAsync(noteBPath, "Conteúdo MODIFICADO da Nota B com novas informações.");
+
+            var mockEmbedding2 = Substitute.For<IEmbeddingProvider>();
+            mockEmbedding2.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(new float[] { 0.3f, 0.4f }));
+
+            var engine2 = new VaultRagEngine(mockEmbedding2, mockAi, indexStore: store);
+            await engine2.IndexVaultAsync(_tempVaultDir);
+
+            // Apenas a Nota B deve ser enviada para gerar embedding
+            await mockEmbedding2.Received(1).GenerateEmbeddingAsync(
+                Arg.Is<string>(s => s.Contains("MODIFICADO")),
+                Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            if (Directory.Exists(tempIndexDir))
+            {
+                try { Directory.Delete(tempIndexDir, true); } catch { }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SearchAsync_HybridSearch_ShouldRankExactKeywordMatchOverWeakSemanticNeighbor()
+    {
+        var rustPath = Path.Combine(_tempVaultDir, "Rust.md");
+        var golangPath = Path.Combine(_tempVaultDir, "Golang.md");
+
+        await File.WriteAllTextAsync(rustPath, "Guia rápido de instalação e sintaxe da linguagem Rust com cargo e rustc.");
+        await File.WriteAllTextAsync(golangPath, "Guia rápido de sintaxe da linguagem Go com goroutines e channels concorrentes.");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        // Vetor de consulta para "Rust"
+        mockEmbedding.GenerateEmbeddingAsync("Rust", Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 0.5f, 0.5f, 0f }));
+
+        // Nota Golang tem vetor com similaridade 1.0 (ligeiramente superior na matemática pura de embedding)
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Is<string>(s => s.Contains("Golang") || s.Contains("goroutines")), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 0.5f, 0.5f, 0f }));
+
+        // Nota Rust tem vetor com similaridade 0.999 (ligeiramente inferior)
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Is<string>(s => s.Contains("Rust") || s.Contains("cargo")), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 0.51f, 0.49f, 0f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi);
+
+        var results = await ragEngine.SearchAsync("Rust", _tempVaultDir, topK: 2);
+
+        // Graças à busca híbrida com RRF e overlap de palavras-chave no título/conteúdo, Rust.md deve vencer Golang.md
+        results.Count.ShouldBe(2);
+        results[0].Title.ShouldBe("Rust");
+        results[1].Title.ShouldBe("Golang");
+        results[0].SimilarityScore.ShouldBeGreaterThan(results[1].SimilarityScore);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempVaultDir))

@@ -27,7 +27,12 @@ public sealed class WpfAppFixture : IDisposable
 
             if (Application.Current is null)
             {
-                _ = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                app.DispatcherUnhandledException += (_, e) =>
+                {
+                    // Evita que exceções em tarefas fire-and-forget encerrem o loop do Dispatcher
+                    e.Handled = true;
+                };
             }
 
             _ready.Set();
@@ -51,6 +56,24 @@ public sealed class WpfAppFixture : IDisposable
     public void Invoke(Action action) => Dispatcher.Invoke(action, DispatcherPriority.Normal);
 
     public T Invoke<T>(Func<T> func) => Dispatcher.Invoke(func, DispatcherPriority.Normal);
+
+    public Task InvokeAsync(Action action)
+    {
+        Dispatcher.Invoke(action, DispatcherPriority.Normal);
+        return Task.CompletedTask;
+    }
+
+    public async Task InvokeAsync(Func<Task> func)
+    {
+        var task = Dispatcher.Invoke(func, DispatcherPriority.Normal);
+        await task;
+    }
+
+    public async Task<T> InvokeAsync<T>(Func<Task<T>> func)
+    {
+        var task = Dispatcher.Invoke(func, DispatcherPriority.Normal);
+        return await task;
+    }
 
     public void Dispose()
     {

@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Shouldly;
 using Synapse.Agent;
 using Synapse.Agent.Models;
+using Synapse.Core.Ports;
 using Synapse.Sync.Auth;
 using Synapse.Sync.Config;
 using Synapse.Sync.GitHub;
@@ -133,11 +134,27 @@ public class RemoteCommandE2ETests : IDisposable
             cursorFilePath: _tempCursorFile);
 
         // Executa o ciclo de polling que baixa o comando, executa e sobe o resultado
-        await poller.RunOnceAsync(CancellationToken.None);
-
-        // 5. Verifica se o resultado foi publicado no GitHub
         var localResultTemp = Path.Combine(Path.GetTempPath(), $"downloaded-res-{commandId}.json");
-        await gitHubProvider.DownloadAsync($".synapse/remote/results/{commandId}.json", localResultTemp, CancellationToken.None);
+        var resultFound = false;
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            await poller.RunOnceAsync(CancellationToken.None);
+            try
+            {
+                await gitHubProvider.DownloadAsync($".synapse/remote/results/{commandId}.json", localResultTemp, CancellationToken.None);
+                if (File.Exists(localResultTemp))
+                {
+                    resultFound = true;
+                    break;
+                }
+            }
+            catch (CloudNotFoundException)
+            {
+                await Task.Delay(1000);
+            }
+        }
+
+        resultFound.ShouldBeTrue("O arquivo de resultado do comando remoto deveria ter sido publicado e baixado.");
 
         File.Exists(localResultTemp).ShouldBeTrue();
         var resultJson = await File.ReadAllTextAsync(localResultTemp);

@@ -96,44 +96,51 @@ public sealed class IpcClient : IAsyncDisposable
 
     public async Task<IpcEnvelope?> SendCommandAsync(string tipo, object? payload = null, CancellationToken ct = default)
     {
-        if (_reader == null || _writer == null)
-        {
-            var connected = await ConnectAsync(1500, ct);
-            if (!connected) return null;
-        }
-
-        await _sendLock.WaitAsync(ct);
         try
         {
-            var envelope = new
+            if (_reader == null || _writer == null)
             {
-                versao = 1,
-                tipo = tipo,
-                payload = payload
-            };
-
-            var json = JsonSerializer.Serialize(envelope);
-            await _writer!.WriteLineAsync(json);
-            await _writer.FlushAsync();
-
-            var responseLine = await _reader!.ReadLineAsync(ct);
-            if (responseLine == null)
-            {
-                await DisconnectAsync();
-                return null;
+                var connected = await ConnectAsync(1500, ct);
+                if (!connected) return null;
             }
 
-            var responseEnvelope = JsonSerializer.Deserialize<IpcEnvelope>(responseLine);
-            return responseEnvelope;
+            await _sendLock.WaitAsync(ct);
+            try
+            {
+                var envelope = new
+                {
+                    versao = 1,
+                    tipo = tipo,
+                    payload = payload
+                };
+
+                var json = JsonSerializer.Serialize(envelope);
+                await _writer!.WriteLineAsync(json);
+                await _writer.FlushAsync();
+
+                var responseLine = await _reader!.ReadLineAsync(ct);
+                if (responseLine == null)
+                {
+                    await DisconnectAsync();
+                    return null;
+                }
+
+                var responseEnvelope = JsonSerializer.Deserialize<IpcEnvelope>(responseLine);
+                return responseEnvelope;
+            }
+            finally
+            {
+                try { _sendLock.Release(); } catch (ObjectDisposedException) { }
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            return null;
         }
         catch
         {
             await DisconnectAsync();
             return null;
-        }
-        finally
-        {
-            _sendLock.Release();
         }
     }
 

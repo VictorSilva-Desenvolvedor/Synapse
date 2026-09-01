@@ -53,11 +53,12 @@ public class TrayStartupIndexingTests : IDisposable
         SynapseTrayApp? app = null;
         try
         {
-            await _fixture.Invoke(async () =>
+            await _fixture.InvokeAsync(async () =>
             {
                 app = new SynapseTrayApp(
                     configManager: configManager,
-                    ragEngineFactory: cfg => new VaultRagEngine(mockEmbedding, mockAi, cfg));
+                    ragEngineFactory: cfg => new VaultRagEngine(mockEmbedding, mockAi, cfg),
+                    autoStartOnboarding: false);
                 await app.CheckInitialOnboardingAsync();
             });
 
@@ -88,7 +89,7 @@ public class TrayStartupIndexingTests : IDisposable
         {
             if (app != null)
             {
-                _fixture.Invoke(() => app.Dispose());
+                await _fixture.InvokeAsync(() => app.Dispose());
             }
         }
     }

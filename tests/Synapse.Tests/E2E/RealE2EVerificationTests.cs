@@ -74,8 +74,9 @@ public class RealE2EVerificationTests : IDisposable
         var authManager = new GitHubAuthManager(tokenStore, clientConfig);
         var gitHubProvider = new GitHubProvider(authManager, clientConfig);
 
-        // 1. Cria nota local
-        var noteRelPath = "Notas/PrimeiraNota.md";
+        // 1. Cria nota local com nome único para isolamento
+        var noteName = $"PrimeiraNota-{Guid.NewGuid():N}.md";
+        var noteRelPath = $"Notas/{noteName}";
         var noteFullPath = Path.Combine(_tempVaultDir, noteRelPath);
         Directory.CreateDirectory(Path.GetDirectoryName(noteFullPath)!);
         var expectedContent = $"# Primeira Nota E2E\nCriada em {DateTime.UtcNow:O} no teste real.";
@@ -85,7 +86,7 @@ public class RealE2EVerificationTests : IDisposable
         var cloudFile = await gitHubProvider.UploadAsync(noteFullPath, "Notas", CancellationToken.None);
 
         cloudFile.ShouldNotBeNull();
-        cloudFile.Name.ShouldBe("PrimeiraNota.md");
+        cloudFile.Name.ShouldBe(noteName);
 
         // 3. Verificação direta via chamada HTTP à API pública do GitHub
         using var client = new HttpClient();
@@ -122,7 +123,7 @@ public class RealE2EVerificationTests : IDisposable
         var gitHubProvider = new GitHubProvider(authManager, clientConfig);
 
         // 1. Cria arquivo diretamente no repositório remoto via API do GitHub
-        var remoteRelPath = "Remoto/NotaCriadaNaNuvem.md";
+        var remoteRelPath = $"Remoto/NotaCriadaNaNuvem-{Guid.NewGuid():N}.md";
         var remoteContent = $"# Nota Criada Diretamente no GitHub\nTimestamp: {DateTime.UtcNow:O}";
 
         using var client = new HttpClient();
@@ -150,11 +151,22 @@ public class RealE2EVerificationTests : IDisposable
             new StringContent(JsonSerializer.Serialize(putPayload), Encoding.UTF8, "application/json"));
         putResp.IsSuccessStatusCode.ShouldBeTrue();
 
-        // 2. Faz download via GitHubProvider do Synapse
+        // 2. Faz download via GitHubProvider do Synapse (com retry para propagação de réplica na API do GitHub)
         var localDownloadPath = Path.Combine(_tempVaultDir, remoteRelPath);
         Directory.CreateDirectory(Path.GetDirectoryName(localDownloadPath)!);
 
-        await gitHubProvider.DownloadAsync(remoteRelPath, localDownloadPath, CancellationToken.None);
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                await gitHubProvider.DownloadAsync(remoteRelPath, localDownloadPath, CancellationToken.None);
+                if (File.Exists(localDownloadPath)) break;
+            }
+            catch (CloudNotFoundException) when (attempt < 4)
+            {
+                await Task.Delay(500);
+            }
+        }
 
         // 3. Valida conteúdo em disco local
         File.Exists(localDownloadPath).ShouldBeTrue();

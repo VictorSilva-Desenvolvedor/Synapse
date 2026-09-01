@@ -65,7 +65,8 @@ public sealed class SynapseTrayApp : IDisposable
     public SynapseTrayApp(
         IpcClient? ipcClient = null,
         SynapseConfigManager? configManager = null,
-        Func<BrainConfig, VaultRagEngine>? ragEngineFactory = null)
+        Func<BrainConfig, VaultRagEngine>? ragEngineFactory = null,
+        bool autoStartOnboarding = true)
     {
         _dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
         _ipcClient = ipcClient ?? new IpcClient();
@@ -180,7 +181,10 @@ public sealed class SynapseTrayApp : IDisposable
         };
         _iconReaffirmTimer.Start();
 
-        _dispatcher.BeginInvoke(async () => await CheckInitialOnboardingAsync());
+        if (autoStartOnboarding)
+        {
+            _dispatcher.BeginInvoke(async () => await CheckInitialOnboardingAsync());
+        }
     }
 
     private static MenuItem NewItem(string header, Action onClick)
@@ -569,8 +573,11 @@ public sealed class SynapseTrayApp : IDisposable
         var lastIcon = _notifyIcon.Icon;
         _notifyIcon.Dispose();
         IconGenerator.ReleaseIcon(lastIcon);
-        _remoteAgentCts.Cancel();
-        _remoteAgentCts.Dispose();
+        try
+        {
+            _remoteAgentCts.Cancel();
+        }
+        catch { }
         _ = _ipcClient.DisposeAsync();
     }
 }

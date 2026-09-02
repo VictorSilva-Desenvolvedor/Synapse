@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -15,7 +16,14 @@ public sealed class VaultRagEngine : IVaultBrainQuery
     private readonly IBrainAiProvider _aiProvider;
     private readonly BrainConfig _config;
     private readonly IVaultIndexStore _indexStore;
-    private readonly Dictionary<string, NoteEmbeddingEntry> _index = new(StringComparer.OrdinalIgnoreCase);
+    // ConcurrentDictionary, nao Dictionary: o Tray indexa o cofre em background enquanto o usuario
+    // pergunta no chat, e as duas coisas caem neste mesmo campo. A versao anterior protegia so as DUAS
+    // escritas com lock (_index) e deixava os outros dez acessos livres - inclusive o foreach da busca.
+    // Percorrer um Dictionary enquanto outra thread insere chave nova lanca "Collection was modified",
+    // reproduzido em teste. Nota: reescrever o valor de uma chave existente NAO dispara isso, so mudanca
+    // estrutural, e foi por isso que o defeito sobreviveu tanto tempo - reindexar o mesmo conjunto de
+    // notas nunca quebrava; bastava uma nota nova durante uma pergunta.
+    private readonly ConcurrentDictionary<string, NoteEmbeddingEntry> _index = new(StringComparer.OrdinalIgnoreCase);
 
     public VaultRagEngine(
         IEmbeddingProvider embeddingProvider,
@@ -60,7 +68,7 @@ public sealed class VaultRagEngine : IVaultBrainQuery
         var staleKeys = _index.Keys.Where(k => !currentRelativePaths.Contains(k)).ToList();
         foreach (var staleKey in staleKeys)
         {
-            _index.Remove(staleKey);
+            _index.TryRemove(staleKey, out _);
             removedAny = true;
         }
 
@@ -100,10 +108,8 @@ public sealed class VaultRagEngine : IVaultBrainQuery
                     var vector = await _embeddingProvider.GenerateEmbeddingAsync(item.Text, ct);
                     var title = Path.GetFileNameWithoutExtension(item.RelativePath);
                     var tokens = Tokenize(title, item.Text);
-                    lock (_index)
-                    {
-                        _index[item.RelativePath] = new NoteEmbeddingEntry(item.RelativePath, item.Hash, vector, DateTimeOffset.UtcNow, tokens);
-                    }
+                    // Sem lock: a atribuicao pelo indexador do ConcurrentDictionary ja e atomica.
+                    _index[item.RelativePath] = new NoteEmbeddingEntry(item.RelativePath, item.Hash, vector, DateTimeOffset.UtcNow, tokens);
                 }
                 catch
                 {
@@ -396,10 +402,7 @@ Pergunta do usuário:
                     var hash = ComputeSha256(noteContent);
                     var title = Path.GetFileNameWithoutExtension(savedNotePath);
                     var tokens = Tokenize(title, noteContent);
-                    lock (_index)
-                    {
-                        _index[savedNotePath] = new NoteEmbeddingEntry(savedNotePath, hash, vector, DateTimeOffset.UtcNow, tokens);
-                    }
+                    _index[savedNotePath] = new NoteEmbeddingEntry(savedNotePath, hash, vector, DateTimeOffset.UtcNow, tokens);
                     await _indexStore.SaveAsync(vaultRootPath, _index, ct);
                 }
                 catch

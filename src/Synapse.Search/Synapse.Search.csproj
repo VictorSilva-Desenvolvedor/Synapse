@@ -19,7 +19,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="Tools\rg.exe" CopyToOutputDirectory="PreserveNewest" />
+    <!-- ExcludeFromSingleFile: com PublishSingleFile=true o bundler embute o rg.exe dentro do
+         Synapse.Tray.exe e o extrai em runtime para uma pasta temporaria, mas o
+         RipgrepSearchEngine.ResolveRipgrepPath procura em AppContext.BaseDirectory, que num app
+         single-file aponta para a pasta do .exe. Sem isso o binario some do publish e a busca
+         cai em contingencia silenciosa no app instalado - os testes nao pegam, porque rodam
+         de bin/ onde a copia normal funciona. -->
+    <None Include="Tools\rg.exe"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          ExcludeFromSingleFile="true" />
     <None Include="Tools\rg-LICENSE-MIT.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Tools\rg-UNLICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

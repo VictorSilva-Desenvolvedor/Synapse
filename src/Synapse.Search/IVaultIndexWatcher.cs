@@ -21,4 +21,15 @@ public interface IVaultIndexWatcher : IDisposable
     /// Indica se o monitor está atualmente ativo.
     /// </summary>
     bool IsRunning { get; }
+
+    /// <summary>
+    /// Indica se o monitor sofreu uma falha crítica (ex: estouro de buffer do FileSystemWatcher)
+    /// e não pode mais garantir a integridade em tempo real do índice.
+    /// </summary>
+    bool HasFailed { get; }
+
+    /// <summary>
+    /// Evento disparado quando o FileSystemWatcher sofre um erro ou falha no sistema de arquivos.
+    /// </summary>
+    event EventHandler<Exception>? ErrorOccurred;
 }

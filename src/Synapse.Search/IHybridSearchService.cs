@@ -39,4 +39,10 @@ public interface IHybridSearchService : IDisposable, IAsyncDisposable
     /// Indica se a indexação em lote (bulk index) inicial ainda está em andamento.
     /// </summary>
     bool IsBulkIndexing { get; }
+
+    /// <summary>
+    /// Indica se o índice FTS5 está pronto e sincronizado pelo watcher para responder a buscas rápidas.
+    /// Retorna false se a indexação inicial ainda estiver rodando ou se o watcher tiver falhado.
+    /// </summary>
+    bool IsIndexReady { get; }
 }

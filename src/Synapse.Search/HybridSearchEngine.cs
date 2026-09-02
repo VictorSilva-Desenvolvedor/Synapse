@@ -3,20 +3,12 @@ using System.Runtime.CompilerServices;
 namespace Synapse.Search;
 
 /// <summary>
-/// Motor de busca híbrido que combina a busca direta e exata em disco do Ripgrep
-/// com a busca indexada em SQLite FTS5 via Reciprocal Rank Fusion (RRF k=60).
+/// Despachante de busca híbrido do Synapse:
+/// - isRegex: true -> Ripgrep sozinho (suporte nativo a expressões regulares).
+/// - Texto comum + índice pronto -> SQLite FTS5 sozinho (<50 ms, sem I/O linear no disco).
+/// - Texto comum + índice não pronto -> Ripgrep como contingência (enquanto indexa ou se o watcher falhar).
 ///
-/// Semântica e divergência entre motores:
-/// - Ripgrep busca por substring exata ou regex diretamente nos arquivos vivos no disco.
-/// - SQLite FTS5 busca por E-de-termos tokenizados (com remoção de acentos via remove_diacritics 2),
-///   onde os termos podem aparecer em posições arbitrárias dentro do documento.
-/// - Documentos contendo a frase exata ou encontrados em ambos os motores recebem a soma
-///   das pontuações recíprocas (SearchMatchSource.Both), assumindo o topo do ranking.
-/// - Documentos onde os termos estão espalhados pelo texto aparecem como SearchMatchSource.IndexOnly.
-/// - Arquivos criados ou modificados recentemente após a última indexação em lote aparecem
-///   como SearchMatchSource.RipgrepOnly.
-/// - Arquivos deletados fisicamente do disco que ainda constam no índice defasado são
-///   automaticamente descartados na consolidação final.
+/// Os dois motores nunca mais rodam juntos.
 /// </summary>
 public sealed class HybridSearchEngine : IHybridSearchEngine
 {
@@ -24,13 +16,18 @@ public sealed class HybridSearchEngine : IHybridSearchEngine
 
     private readonly IVaultSearchIndex _searchIndex;
     private readonly IRawSearchEngine _rawSearchEngine;
+    private readonly Func<bool>? _isIndexReadyFunc;
+
+    public Func<bool>? IsIndexReady { get; set; }
 
     public HybridSearchEngine(
         IVaultSearchIndex searchIndex,
-        IRawSearchEngine rawSearchEngine)
+        IRawSearchEngine rawSearchEngine,
+        Func<bool>? isIndexReady = null)
     {
         _searchIndex = searchIndex ?? throw new ArgumentNullException(nameof(searchIndex));
         _rawSearchEngine = rawSearchEngine ?? throw new ArgumentNullException(nameof(rawSearchEngine));
+        _isIndexReadyFunc = isIndexReady;
     }
 
     public async IAsyncEnumerable<HybridSearchResult> SearchAsync(
@@ -62,177 +59,119 @@ public sealed class HybridSearchEngine : IHybridSearchEngine
 
         ct.ThrowIfCancellationRequested();
 
-        // 1. Executa ambas as buscas concorrentemente
-        var ftsTask = CollectFtsResultsAsync(query, limit * 3, ct);
-        var rgTask = CollectRipgrepResultsAsync(vaultRootPath, query, isRegex, ct);
+        bool isReady = IsIndexReady?.Invoke() ?? _isIndexReadyFunc?.Invoke() ?? true;
 
-        await Task.WhenAll(ftsTask, rgTask).ConfigureAwait(false);
-
-        var ftsResults = await ftsTask.ConfigureAwait(false);
-        var rgResults = await rgTask.ConfigureAwait(false);
-
-        ct.ThrowIfCancellationRequested();
-
-        // 2. Mapeamento de rankings 1-indexed por caminho canônico
-        // FTS Ranking: preserva a ordem BM25 do SQLite
-        var ftsRanking = new Dictionary<string, (int Rank, VaultSearchResult Item)>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < ftsResults.Count; i++)
+        // Despachante: os dois motores nunca mais rodam juntos.
+        // 1. isRegex: true -> Ripgrep sozinho.
+        // 2. Texto comum + índice pronto -> FTS5 sozinho (<50ms).
+        // 3. Texto comum + índice não pronto -> Ripgrep como contingência.
+        if (isRegex || !isReady)
         {
-            var item = ftsResults[i];
-            var canonical = ToCanonicalRelativePath(item.FilePath, vaultRootPath);
-            if (!string.IsNullOrEmpty(canonical) && !ftsRanking.ContainsKey(canonical))
+            await foreach (var result in ExecuteRipgrepOnlyAsync(vaultRootPath, query, isRegex, limit, ct).ConfigureAwait(false))
             {
-                ftsRanking[canonical] = (i + 1, item);
+                yield return result;
             }
         }
-
-        // Ripgrep Ranking: preserva a ordem do primeiro match retornado por arquivo
-        var rgRanking = new Dictionary<string, (int Rank, List<RipgrepMatch> Matches)>(StringComparer.OrdinalIgnoreCase);
-        int currentRgRank = 1;
-        foreach (var (canonicalPath, matches) in rgResults)
+        else
         {
-            if (!rgRanking.ContainsKey(canonicalPath))
+            await foreach (var result in ExecuteFtsOnlyAsync(vaultRootPath, query, limit, ct).ConfigureAwait(false))
             {
-                rgRanking[canonicalPath] = (currentRgRank++, matches);
+                yield return result;
             }
         }
+    }
 
-        // 3. Conjunto unificado de todos os caminhos encontrados
-        var allPaths = new HashSet<string>(ftsRanking.Keys, StringComparer.OrdinalIgnoreCase);
-        allPaths.UnionWith(rgRanking.Keys);
+    private async IAsyncEnumerable<HybridSearchResult> ExecuteFtsOnlyAsync(
+        string vaultRootPath,
+        string query,
+        int limit,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        int rank = 1;
+        int yielded = 0;
 
-        // 4. Reciprocal Rank Fusion (RRF k=60)
-        var fusedResults = new List<HybridSearchResult>(allPaths.Count);
-
-        foreach (var path in allPaths)
+        await foreach (var item in _searchIndex.SearchAsync(query, limit * 2, ct).ConfigureAwait(false))
         {
             ct.ThrowIfCancellationRequested();
 
-            bool hasFts = ftsRanking.TryGetValue(path, out var ftsEntry);
-            bool hasRg = rgRanking.TryGetValue(path, out var rgEntry);
+            var canonical = ToCanonicalRelativePath(item.FilePath, vaultRootPath);
+            if (string.IsNullOrEmpty(canonical))
+            {
+                continue;
+            }
 
             // Descarte de arquivos fantasmas (deletados do disco físico mas presentes no índice)
-            var fullPhysicalPath = Path.Combine(vaultRootPath, path.Replace('/', Path.DirectorySeparatorChar));
+            var fullPhysicalPath = Path.Combine(vaultRootPath, canonical.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(fullPhysicalPath))
             {
                 continue;
             }
 
-            double ftsScore = hasFts ? 1.0 / (RrfK + ftsEntry.Rank) : 0.0;
-            double rgScore = hasRg ? 1.0 / (RrfK + rgEntry.Rank) : 0.0;
-            double totalScore = ftsScore + rgScore;
+            yield return new HybridSearchResult(
+                FilePath: canonical,
+                Score: 1.0 / (RrfK + rank++),
+                Source: SearchMatchSource.IndexOnly,
+                Snippet: item.Snippet,
+                RipgrepMatches: Array.Empty<RipgrepMatch>());
 
-            SearchMatchSource source;
-            if (hasFts && hasRg)
+            if (++yielded >= limit)
             {
-                source = SearchMatchSource.Both;
+                break;
             }
-            else if (hasFts)
-            {
-                source = SearchMatchSource.IndexOnly;
-            }
-            else
-            {
-                source = SearchMatchSource.RipgrepOnly;
-            }
-
-            string? snippet = null;
-            if (hasFts && !string.IsNullOrWhiteSpace(ftsEntry.Item.Snippet))
-            {
-                snippet = ftsEntry.Item.Snippet;
-            }
-            else if (hasRg && rgEntry.Matches.Count > 0)
-            {
-                snippet = rgEntry.Matches[0].LineText;
-            }
-
-            var matchesList = hasRg ? (IReadOnlyList<RipgrepMatch>)rgEntry.Matches : Array.Empty<RipgrepMatch>();
-
-            fusedResults.Add(new HybridSearchResult(
-                FilePath: path,
-                Score: totalScore,
-                Source: source,
-                Snippet: snippet,
-                RipgrepMatches: matchesList));
-        }
-
-        // 5. Ordenação decrescente por score RRF com desempate determinístico por caminho
-        var orderedResults = fusedResults
-            .OrderByDescending(r => r.Score)
-            .ThenBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
-            .Take(limit);
-
-        foreach (var result in orderedResults)
-        {
-            ct.ThrowIfCancellationRequested();
-            yield return result;
         }
     }
 
-    private async Task<List<VaultSearchResult>> CollectFtsResultsAsync(
-        string query,
-        int limit,
-        CancellationToken ct)
-    {
-        var list = new List<VaultSearchResult>();
-        try
-        {
-            await foreach (var item in _searchIndex.SearchAsync(query, limit, ct).ConfigureAwait(false))
-            {
-                list.Add(item);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            // Erros no FTS não devem derrubar a busca se o Ripgrep puder responder
-        }
-
-        return list;
-    }
-
-    private async Task<List<(string CanonicalPath, List<RipgrepMatch> Matches)>> CollectRipgrepResultsAsync(
+    private async IAsyncEnumerable<HybridSearchResult> ExecuteRipgrepOnlyAsync(
         string vaultRootPath,
         string query,
         bool isRegex,
-        CancellationToken ct)
+        int limit,
+        [EnumeratorCancellation] CancellationToken ct)
     {
-        var dict = new Dictionary<string, List<RipgrepMatch>>(StringComparer.OrdinalIgnoreCase);
-        var orderedList = new List<(string CanonicalPath, List<RipgrepMatch> Matches)>();
+        var dict = new Dictionary<string, (int Rank, List<RipgrepMatch> Matches)>(StringComparer.OrdinalIgnoreCase);
+        var orderedFiles = new List<string>();
+        int currentRank = 1;
 
-        try
+        await foreach (var match in _rawSearchEngine.SearchAsync(vaultRootPath, query, isRegex, ct).ConfigureAwait(false))
         {
-            await foreach (var match in _rawSearchEngine.SearchAsync(vaultRootPath, query, isRegex, ct).ConfigureAwait(false))
+            ct.ThrowIfCancellationRequested();
+
+            var canonical = ToCanonicalRelativePath(match.FilePath, vaultRootPath);
+            if (string.IsNullOrEmpty(canonical))
             {
-                var canonical = ToCanonicalRelativePath(match.FilePath, vaultRootPath);
-                if (string.IsNullOrEmpty(canonical))
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                if (!dict.TryGetValue(canonical, out var list))
-                {
-                    list = new List<RipgrepMatch>();
-                    dict[canonical] = list;
-                    orderedList.Add((canonical, list));
-                }
+            if (!dict.TryGetValue(canonical, out var entry))
+            {
+                entry = (currentRank++, new List<RipgrepMatch>());
+                dict[canonical] = entry;
+                orderedFiles.Add(canonical);
+            }
 
-                list.Add(match);
+            entry.Matches.Add(match);
+        }
+
+        int yielded = 0;
+        foreach (var canonical in orderedFiles)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var (rank, matches) = dict[canonical];
+            var snippet = matches.Count > 0 ? matches[0].LineText : null;
+
+            yield return new HybridSearchResult(
+                FilePath: canonical,
+                Score: 1.0 / (RrfK + rank),
+                Source: SearchMatchSource.RipgrepOnly,
+                Snippet: snippet,
+                RipgrepMatches: matches);
+
+            if (++yielded >= limit)
+            {
+                break;
             }
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            // Erros no Ripgrep não devem derrubar a busca se o FTS puder responder
-        }
-
-        return orderedList;
     }
 
     /// <summary>

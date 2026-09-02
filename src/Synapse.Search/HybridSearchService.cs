@@ -19,6 +19,7 @@ public sealed class HybridSearchService : IHybridSearchService
 
     public bool IsInitialized => _vaultRootPath != null;
     public bool IsBulkIndexing { get; private set; }
+    public bool IsIndexReady => IsInitialized && !IsBulkIndexing && _indexWatcher.IsRunning && !_indexWatcher.HasFailed;
 
     public HybridSearchService(
         IVaultSearchIndex searchIndex,
@@ -32,8 +33,13 @@ public sealed class HybridSearchService : IHybridSearchService
         _rawSearchEngine = rawSearchEngine ?? throw new ArgumentNullException(nameof(rawSearchEngine));
         _bulkIndexer = bulkIndexer ?? throw new ArgumentNullException(nameof(bulkIndexer));
         _indexWatcher = indexWatcher ?? throw new ArgumentNullException(nameof(indexWatcher));
-        _hybridEngine = hybridEngine ?? new HybridSearchEngine(_searchIndex, _rawSearchEngine);
+        _hybridEngine = hybridEngine ?? new HybridSearchEngine(_searchIndex, _rawSearchEngine, () => IsIndexReady);
         _ownsDependencies = ownsDependencies;
+
+        if (_hybridEngine is HybridSearchEngine hse && hse.IsIndexReady == null)
+        {
+            hse.IsIndexReady = () => IsIndexReady;
+        }
     }
 
     /// <summary>
@@ -50,14 +56,13 @@ public sealed class HybridSearchService : IHybridSearchService
         var rawSearchEngine = new RipgrepSearchEngine(customRgPath);
         var bulkIndexer = new VaultBulkIndexer(bulkBatchSize);
         var indexWatcher = new VaultIndexWatcher(searchIndex, watcherDebounce);
-        var hybridEngine = new HybridSearchEngine(searchIndex, rawSearchEngine);
 
         return new HybridSearchService(
             searchIndex,
             rawSearchEngine,
             bulkIndexer,
             indexWatcher,
-            hybridEngine,
+            hybridEngine: null,
             ownsDependencies: true);
     }
 

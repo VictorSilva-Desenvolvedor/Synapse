@@ -1,3 +1,4 @@
+using NSubstitute;
 using Shouldly;
 using Synapse.Search;
 
@@ -74,11 +75,12 @@ public sealed class HybridSearchServiceTests : IDisposable
         // Assert
         _service.IsInitialized.ShouldBeTrue();
         _service.IsBulkIndexing.ShouldBeFalse();
+        _service.IsIndexReady.ShouldBeTrue();
         progressReported.ShouldBe(8);
 
         var results = await SearchAsync("termoInicializacaoService");
         results.Count.ShouldBe(8);
-        results.All(r => r.Source == SearchMatchSource.Both).ShouldBeTrue();
+        results.All(r => r.Source == SearchMatchSource.IndexOnly).ShouldBeTrue();
     }
 
     [Fact]
@@ -200,7 +202,69 @@ public sealed class HybridSearchServiceTests : IDisposable
         var results = await SearchAsync("termoRefletidoWatcher");
         results.Count.ShouldBe(1);
         results[0].FilePath.ShouldBe("nova_pos_init.md");
-        results[0].Source.ShouldBe(SearchMatchSource.Both);
+        results[0].Source.ShouldBe(SearchMatchSource.IndexOnly);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenWatcherFails_MarksIndexNotReadyAndFallsBackToRipgrep()
+    {
+        // Arrange
+        var note = Path.Combine(_tempVaultDir, "resiliencia.md");
+        await File.WriteAllTextAsync(note, "Conteudo exclusivo com palavraResilienciaTotal no disco.");
+
+        var mockWatcher = Substitute.For<IVaultIndexWatcher>();
+        mockWatcher.IsRunning.Returns(true);
+        mockWatcher.HasFailed.Returns(false);
+
+        var dedicatedDbPath = Path.Combine(Path.GetTempPath(), $"synapse-watcher-fail-{Guid.NewGuid():N}.db");
+        var searchIndex = SqliteVaultSearchIndex.ForFile(dedicatedDbPath);
+        var rawSearchEngine = new RipgrepSearchEngine();
+        var bulkIndexer = new VaultBulkIndexer(10);
+
+        try
+        {
+            using var service = new HybridSearchService(
+                searchIndex,
+                rawSearchEngine,
+                bulkIndexer,
+                mockWatcher,
+                ownsDependencies: false);
+
+            await service.InitializeAsync(_tempVaultDir);
+
+            // 1. Com watcher saudável, índice está pronto e a busca comum usa FTS5 sozinho (IndexOnly)
+            service.IsIndexReady.ShouldBeTrue();
+            var resultsBefore = new List<HybridSearchResult>();
+            await foreach (var r in service.SearchAsync("palavraResilienciaTotal"))
+            {
+                resultsBefore.Add(r);
+            }
+            resultsBefore.Count.ShouldBe(1);
+            resultsBefore[0].Source.ShouldBe(SearchMatchSource.IndexOnly);
+
+            // 2. Act - Simula morte/falha do watcher (ex: estouro de buffer do FileSystemWatcher)
+            mockWatcher.HasFailed.Returns(true);
+            mockWatcher.ErrorOccurred += Raise.Event<EventHandler<Exception>>(
+                mockWatcher,
+                new IOException("Estouro de buffer do FileSystemWatcher simulado"));
+
+            // 3. Assert - O índice deixa imediatamente de ser considerado pronto
+            service.IsIndexReady.ShouldBeFalse();
+
+            // 4. A busca degrada automaticamente para o Ripgrep sozinho como contingência (RipgrepOnly)
+            var resultsAfter = new List<HybridSearchResult>();
+            await foreach (var r in service.SearchAsync("palavraResilienciaTotal"))
+            {
+                resultsAfter.Add(r);
+            }
+            resultsAfter.Count.ShouldBe(1);
+            resultsAfter[0].Source.ShouldBe(SearchMatchSource.RipgrepOnly);
+        }
+        finally
+        {
+            searchIndex.Dispose();
+            try { if (File.Exists(dedicatedDbPath)) File.Delete(dedicatedDbPath); } catch { }
+        }
     }
 
     [Fact]

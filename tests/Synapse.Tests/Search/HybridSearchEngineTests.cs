@@ -1,3 +1,4 @@
+using NSubstitute;
 using Shouldly;
 using Synapse.Search;
 
@@ -56,7 +57,7 @@ public sealed class HybridSearchEngineTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchAsync_WhenTermPresentInBoth_ReturnsBothWithHigherScore()
+    public async Task SearchAsync_WhenIndexReady_ReturnsResultsFromIndexOnlyInMilliseconds()
     {
         // Arrange
         // Doc 1: presente em ambos (disco + índice FTS5)
@@ -72,27 +73,15 @@ public sealed class HybridSearchEngineTests : IDisposable
         // Act
         var results = await SearchAsync("palavraChaveUnica");
 
-        // Assert
+        // Assert: com índice pronto, o FTS5 responde ambos como IndexOnly
         results.Count.ShouldBe(2);
-
-        // Doc 1 veio de ambos os motores e deve estar no topo com score RRF combinado
-        var doc1 = results.First(r => r.FilePath == "doc1.md");
-        doc1.Source.ShouldBe(SearchMatchSource.Both);
-        doc1.RipgrepMatches.Count.ShouldBe(1);
-        doc1.Snippet.ShouldNotBeNullOrEmpty();
-
-        // Doc 2 veio apenas do índice FTS5
-        var doc2 = results.First(r => r.FilePath == "doc2.md");
-        doc2.Source.ShouldBe(SearchMatchSource.IndexOnly);
-        doc2.RipgrepMatches.ShouldBeEmpty();
-
-        // Score do doc presente em ambos deve ser estritamente maior que o do índice isolado
-        doc1.Score.ShouldBeGreaterThan(doc2.Score);
-        results[0].FilePath.ShouldBe("doc1.md");
+        results.All(r => r.Source == SearchMatchSource.IndexOnly).ShouldBeTrue();
+        results.Select(r => r.FilePath).ShouldContain("doc1.md");
+        results.Select(r => r.FilePath).ShouldContain("doc2.md");
     }
 
     [Fact]
-    public async Task SearchAsync_WhenFileCreatedAfterIndexing_ReturnsRipgrepOnly()
+    public async Task SearchAsync_WhenFileCreatedAfterIndexing_ReturnsRipgrepOnlyWhenIndexNotReady()
     {
         // Arrange
         // Popula o índice FTS5 com um arquivo qualquer
@@ -101,6 +90,9 @@ public sealed class HybridSearchEngineTests : IDisposable
         // Cria um arquivo novo no disco que ainda não foi indexado
         var novoFile = Path.Combine(_tempVaultDir, "novo.md");
         await File.WriteAllTextAsync(novoFile, "Nota recem-criada com termoNovoAoVivo no disco.");
+
+        // Simula estado em que o índice não está pronto (contingência Ripgrep)
+        _hybridEngine.IsIndexReady = () => false;
 
         // Act
         var results = await SearchAsync("termoNovoAoVivo");
@@ -126,20 +118,18 @@ public sealed class HybridSearchEngineTests : IDisposable
         // Act
         var results = await SearchAsync("palavraChaveFantasma");
 
-        // Assert: o motor híbrido deve descartar o arquivo fantasma
+        // Assert: o motor deve descartar o arquivo fantasma mesmo no despacho de FTS5
         results.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task SearchAsync_WithDiverseSemantics_IdentifiesIndexOnlyVsBothCorrectly()
+    public async Task SearchAsync_WithDiverseSemantics_DispatchesToIndexOnly()
     {
         // Arrange
-        // Nota 1: contém a frase contínua "sync conflito" (casa no Ripgrep e no FTS5)
         var file1 = Path.Combine(_tempVaultDir, "exato.md");
         await File.WriteAllTextAsync(file1, "Nota contendo sync conflito na mesma linha.");
         await _searchIndex.IndexFileAsync("exato.md", "Nota contendo sync conflito na mesma linha.");
 
-        // Nota 2: contém as duas palavras separadas em posições diferentes (casa no FTS5 AND, mas não como substring no Ripgrep)
         var file2 = Path.Combine(_tempVaultDir, "separado.md");
         await File.WriteAllTextAsync(file2, "O conflito de notas foi gerado durante o processo de sync.");
         await _searchIndex.IndexFileAsync("separado.md", "O conflito de notas foi gerado durante o processo de sync.");
@@ -147,22 +137,18 @@ public sealed class HybridSearchEngineTests : IDisposable
         // Act
         var results = await SearchAsync("sync conflito");
 
-        // Assert
+        // Assert: com índice pronto, FTS5 responde ambos como IndexOnly
         results.Count.ShouldBe(2);
 
         var exato = results.First(r => r.FilePath == "exato.md");
-        exato.Source.ShouldBe(SearchMatchSource.Both);
+        exato.Source.ShouldBe(SearchMatchSource.IndexOnly);
 
         var separado = results.First(r => r.FilePath == "separado.md");
         separado.Source.ShouldBe(SearchMatchSource.IndexOnly);
-
-        // O resultado exato (Both) pontua acima do resultado separado (IndexOnly)
-        exato.Score.ShouldBeGreaterThan(separado.Score);
-        results[0].FilePath.ShouldBe("exato.md");
     }
 
     [Fact]
-    public async Task SearchAsync_WhenPathsHaveDifferentFormats_MergesIntoBothWithCanonicalPath()
+    public async Task SearchAsync_WhenPathsHaveDifferentFormats_NormalizesToCanonicalPath()
     {
         // Arrange
         var subDir = Path.Combine(_tempVaultDir, "sub", "pasta");
@@ -177,10 +163,9 @@ public sealed class HybridSearchEngineTests : IDisposable
         var results = await SearchAsync("termoCasamentoDeCaminho");
 
         // Assert
-        // Deve fundir os dois motores no mesmo caminho canônico normalizado
         results.Count.ShouldBe(1);
         results[0].FilePath.ShouldBe("sub/pasta/documento.md");
-        results[0].Source.ShouldBe(SearchMatchSource.Both);
+        results[0].Source.ShouldBe(SearchMatchSource.IndexOnly);
     }
 
     [Fact]
@@ -196,6 +181,115 @@ public sealed class HybridSearchEngineTests : IDisposable
 
         // Assert
         results.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithIndexReady_DoesNotInvokeRawSearchEngineAtAll()
+    {
+        // Arrange
+        var notePath = Path.Combine(_tempVaultDir, "rapido.md");
+        await File.WriteAllTextAsync(notePath, "Conteúdo da nota rápida com termoEspiao.");
+
+        var mockIndex = Substitute.For<IVaultSearchIndex>();
+        mockIndex.SearchAsync("termoEspiao", Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(AsAsyncEnumerable([
+                new VaultSearchResult("rapido.md", "snippet", -1.0)
+            ]));
+
+        var spyRawEngine = Substitute.For<IRawSearchEngine>();
+        var engine = new HybridSearchEngine(mockIndex, spyRawEngine, () => true);
+
+        // Act
+        var results = new List<HybridSearchResult>();
+        await foreach (var r in engine.SearchAsync(_tempVaultDir, "termoEspiao"))
+        {
+            results.Add(r);
+        }
+
+        // Assert: Prova mandatória - com índice pronto, o Ripgrep NÃO é invocado nenhuma vez
+        spyRawEngine.DidNotReceiveWithAnyArgs().SearchAsync(default!, default!, default!, default!);
+        results.Count.ShouldBe(1);
+        results[0].Source.ShouldBe(SearchMatchSource.IndexOnly);
+        results[0].FilePath.ShouldBe("rapido.md");
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithRegex_InvokesRipgrepAndDoesNotInvokeSearchIndex()
+    {
+        // Arrange
+        var mockIndex = Substitute.For<IVaultSearchIndex>();
+        var mockRawEngine = Substitute.For<IRawSearchEngine>();
+        mockRawEngine.SearchAsync(_tempVaultDir, "patt.*rn", true, Arg.Any<CancellationToken>())
+            .Returns(AsAsyncEnumerable([
+                new RipgrepMatch("nota.md", 1, "pattern line", 0, 7)
+            ]));
+
+        var engine = new HybridSearchEngine(mockIndex, mockRawEngine, () => true);
+
+        // Act
+        var results = new List<HybridSearchResult>();
+        await foreach (var r in engine.SearchAsync(_tempVaultDir, "patt.*rn", isRegex: true))
+        {
+            results.Add(r);
+        }
+
+        // Assert: Prova mandatória - regex invoca Ripgrep e NÃO toca no índice
+        mockIndex.DidNotReceiveWithAnyArgs().SearchAsync(default!, default!, default!);
+        mockRawEngine.Received(1).SearchAsync(_tempVaultDir, "patt.*rn", true, Arg.Any<CancellationToken>());
+        results.Count.ShouldBe(1);
+        results[0].Source.ShouldBe(SearchMatchSource.RipgrepOnly);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenIndexNotReady_RespondsViaRipgrepContingency()
+    {
+        // Arrange
+        var mockIndex = Substitute.For<IVaultSearchIndex>();
+        var mockRawEngine = Substitute.For<IRawSearchEngine>();
+        mockRawEngine.SearchAsync(_tempVaultDir, "termoContingencia", false, Arg.Any<CancellationToken>())
+            .Returns(AsAsyncEnumerable([
+                new RipgrepMatch("nota.md", 1, "linha com termoContingencia", 0, 10)
+            ]));
+
+        var engine = new HybridSearchEngine(mockIndex, mockRawEngine, () => false); // Índice NÃO pronto
+
+        // Act
+        var results = new List<HybridSearchResult>();
+        await foreach (var r in engine.SearchAsync(_tempVaultDir, "termoContingencia", isRegex: false))
+        {
+            results.Add(r);
+        }
+
+        // Assert: Prova mandatória - índice não pronto responde via Ripgrep sem tocar no índice
+        mockIndex.DidNotReceiveWithAnyArgs().SearchAsync(default!, default!, default!);
+        mockRawEngine.Received(1).SearchAsync(_tempVaultDir, "termoContingencia", false, Arg.Any<CancellationToken>());
+        results.Count.ShouldBe(1);
+        results[0].Source.ShouldBe(SearchMatchSource.RipgrepOnly);
+    }
+
+    [Fact]
+    public async Task SearchAsync_Bm25Ordering_RespectsLimit()
+    {
+        // Arrange - 5 documentos com repetições crescentes do termo para afetar o rank BM25
+        for (int i = 1; i <= 5; i++)
+        {
+            var p = Path.Combine(_tempVaultDir, $"doc_{i}.md");
+            var content = string.Join(" ", Enumerable.Repeat("termoBm25Limit", i));
+            await File.WriteAllTextAsync(p, content);
+            await _searchIndex.IndexFileAsync($"doc_{i}.md", content);
+        }
+
+        // Act - busca com limit = 3
+        var results = await SearchAsync("termoBm25Limit", limit: 3);
+
+        // Assert: Prova mandatória - respeita o limit estrito de 3 e preserva a ordenação BM25
+        results.Count.ShouldBe(3);
+        results.All(r => r.Source == SearchMatchSource.IndexOnly).ShouldBeTrue();
+
+        // O documento 5 tem a maior densidade do termo e deve estar no topo
+        results[0].FilePath.ShouldBe("doc_5.md");
+        results[0].Score.ShouldBeGreaterThan(results[1].Score);
+        results[1].Score.ShouldBeGreaterThan(results[2].Score);
     }
 
     [Fact]
@@ -264,5 +358,14 @@ public sealed class HybridSearchEngineTests : IDisposable
         await Task.WhenAll(indexTask, searchTask);
 
         (await searchTask).ShouldBe(20, "todas as 20 buscas híbridas devem encontrar a nota base mesmo sob indexação intensa");
+    }
+
+    private static async IAsyncEnumerable<T> AsAsyncEnumerable<T>(IEnumerable<T> items)
+    {
+        await Task.Yield();
+        foreach (var item in items)
+        {
+            yield return item;
+        }
     }
 }

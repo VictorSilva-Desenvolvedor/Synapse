@@ -21,6 +21,8 @@ public sealed class VaultIndexWatcher : IVaultIndexWatcher
     private bool _isDisposed;
 
     public bool IsRunning => _watcher?.EnableRaisingEvents ?? false;
+    public bool HasFailed { get; private set; }
+    public event EventHandler<Exception>? ErrorOccurred;
 
     public VaultIndexWatcher(
         IVaultSearchIndex searchIndex,
@@ -55,6 +57,7 @@ public sealed class VaultIndexWatcher : IVaultIndexWatcher
                 Stop();
             }
 
+            HasFailed = false;
             _vaultRootPath = Path.GetFullPath(vaultRootPath);
 
             _watcher = new FileSystemWatcher(_vaultRootPath)
@@ -219,7 +222,14 @@ public sealed class VaultIndexWatcher : IVaultIndexWatcher
 
     private void OnWatcherError(object sender, ErrorEventArgs e)
     {
-        // Erro no buffer do watcher ou sistema de arquivos - tolerado sem derrubar a aplicação
+        HasFailed = true;
+        var ex = e.GetException();
+        ErrorOccurred?.Invoke(this, ex);
+    }
+
+    internal void SimulateWatcherError(Exception? ex = null)
+    {
+        OnWatcherError(this, new ErrorEventArgs(ex ?? new IOException("Erro simulado no buffer do FileSystemWatcher.")));
     }
 
     private void ScheduleDebounce(string fullPath, string canonicalPath)

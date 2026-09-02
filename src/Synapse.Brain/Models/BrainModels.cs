@@ -16,7 +16,10 @@ public sealed class BrainConfig
 
     // Configurações do Ollama (Local & 100% Offline)
     public string OllamaEndpoint { get; set; } = "http://localhost:11434";
-    public string OllamaModel { get; set; } = "llama3.1:8b";
+    // llama3.2:3b em vez do 3.1:8b: o Ollama descarrega o modelo da VRAM apos ~5 min ocioso, entao
+    // cada pergunta paga o recarregamento. Medido nesta maquina (GTX 1660 Super, 6 GB): 8b leva
+    // 9,5 s so para carregar contra 2,3 s do 3b - com a inferencia em si custando ~40 ms nos dois.
+    public string OllamaModel { get; set; } = "llama3.2:3b";
     public string OllamaEmbeddingModel { get; set; } = "nomic-embed-text";
 
     // Pastas de destino no cofre

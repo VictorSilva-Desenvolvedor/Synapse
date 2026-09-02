@@ -42,7 +42,7 @@ public sealed class SynapseConfig
     // Configurações do Ollama local, usado como fallback automático quando o Gemini
     // falha (cota diária excedida, indisponibilidade, etc.) - ver FallbackAiProvider.
     public string OllamaEndpoint { get; set; } = "http://localhost:11434";
-    public string OllamaModel { get; set; } = "llama3.1:8b";
+    public string OllamaModel { get; set; } = "llama3.2:3b";
     public string OllamaEmbeddingModel { get; set; } = "nomic-embed-text";
 
     // Controle Remoto via GitHub Relay (Fase 1 e Fase 2)

@@ -663,4 +663,194 @@ public class VaultRagEngineTests : IDisposable
         // E o excerto dos sobreviventes continua sendo preenchido de verdade
         results.ShouldAllBe(r => r.Excerpt.Length > 0);
     }
+
+    [Fact]
+    public async Task ReadExcerpt_WhenTermIsOnLine40InLargeNote_IncludesTermInExcerpt()
+    {
+        // Arrange: nota grande (> 4000 caracteres) onde o termo específico ("Felipe") está na linha 40 numa tabela
+        var notePath = Path.Combine(_tempVaultDir, "ListaDeAmigos.md");
+        var sb = new System.Text.StringBuilder();
+        for (int i = 1; i <= 60; i++)
+        {
+            if (i == 40)
+            {
+                sb.AppendLine("| Nome | Relacao | Detalhes | Data |");
+                sb.AppendLine("| Felipe | Colega | Engenheiro de Software na Synapse | 2026-09-02 |");
+            }
+            else
+            {
+                sb.AppendLine($"Linha {i:D2}: Preenchimento longo para garantir que o arquivo ultrapasse quatro mil caracteres no teste do Synapse.");
+            }
+        }
+        var fileContent = sb.ToString();
+        fileContent.Length.ShouldBeGreaterThan(4000);
+        await File.WriteAllTextAsync(notePath, fileContent);
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 0f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi);
+
+        await ragEngine.IndexVaultAsync(_tempVaultDir);
+
+        // Act
+        var results = await ragEngine.SearchAsync("Felipe", _tempVaultDir, topK: 1);
+
+        // Assert: a tabela com Felipe na linha 40 DEVE estar no Excerpt enviado para a IA
+        results.Count.ShouldBe(1);
+        results[0].Excerpt.ShouldContain("Felipe");
+        results[0].Excerpt.ShouldContain("Engenheiro de Software");
+    }
+
+    [Fact]
+    public async Task ReadExcerpt_WhenNoteIsSmall_IncludesEntireContent()
+    {
+        // Arrange: nota pequena (<= 4000 caracteres)
+        var notePath = Path.Combine(_tempVaultDir, "Pequena.md");
+        var content = "# Lista de Tarefas\n- [ ] Comprar café\n- [x] Implementar despachante\n- [ ] Rodar testes";
+        await File.WriteAllTextAsync(notePath, content);
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 0f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi);
+        await ragEngine.IndexVaultAsync(_tempVaultDir);
+
+        // Act
+        var results = await ragEngine.SearchAsync("café", _tempVaultDir, topK: 1);
+
+        // Assert: nota pequena vai inteira sem cortes
+        results.Count.ShouldBe(1);
+        results[0].Excerpt.ShouldBe(content);
+    }
+
+    [Fact]
+    public void ReadExcerpt_StripsHtmlTagsFromSnippetAndExcerpts()
+    {
+        // Arrange
+        var rawWithHtml = "Texto com marcação <b>negrito</b> e <i>itálico</i> além de <mark>destaque</mark>.";
+
+        // Act
+        var cleaned = VaultRagEngine.StripHtml(rawWithHtml);
+
+        // Assert: nenhuma tag HTML deve permanecer
+        cleaned.ShouldBe("Texto com marcação negrito e itálico além de destaque.");
+        cleaned.ShouldNotContain("<b>");
+        cleaned.ShouldNotContain("</b>");
+        cleaned.ShouldNotContain("<mark>");
+        cleaned.ShouldNotContain("</mark>");
+    }
+
+    [Fact]
+    public void EnforceGlobalContextBudget_Respects16kCeilingAndNeverCutsTableLines()
+    {
+        // Arrange: 4 notas, cada uma com 5.000 caracteres e tabelas Markdown estruturadas
+        var notes = new List<SemanticSearchResult>();
+        for (int n = 1; n <= 4; n++)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"# Nota {n} Relevante");
+            for (int r = 1; r <= 80; r++)
+            {
+                sb.AppendLine($"| ColunaA_{r:D2} | ColunaB_{r:D2} | Detalhes bem longos da tabela para preencher tamanho {r:D2} |");
+            }
+            notes.Add(new SemanticSearchResult($"nota_{n}.md", $"Nota {n}", sb.ToString(), 1.0f / n));
+        }
+
+        // Act: aplica o teto global de 16.000 chars
+        var budgeted = VaultRagEngine.EnforceGlobalContextBudget(notes, maxChars: 16000);
+
+        // Assert:
+        // 1. Teto global respeitado estritamente
+        int totalChars = budgeted.Sum(n => n.Excerpt.Length);
+        totalChars.ShouldBeLessThanOrEqualTo(16000);
+
+        // 2. Notas mais relevantes são preservadas integralmente primeiro
+        budgeted.Count.ShouldBeGreaterThan(0);
+        budgeted[0].Title.ShouldBe("Nota 1");
+
+        // 3. NUNCA corta no meio de uma linha de tabela Markdown (| ... |)
+        foreach (var note in budgeted)
+        {
+            var lines = note.Excerpt.Split(["\r\n", "\r", "\n"], StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("|"))
+                {
+                    line.EndsWith("|").ShouldBeTrue("Linha de tabela cortada pela metade!");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenFtsHasSufficientResults_DoesNotCallEmbeddingProviderAtAll()
+    {
+        // Arrange: 3 notas no cofre com FTS5 devolvendo resultados suficientes (>= 3)
+        var note1 = Path.Combine(_tempVaultDir, "Doc1.md");
+        var note2 = Path.Combine(_tempVaultDir, "Doc2.md");
+        var note3 = Path.Combine(_tempVaultDir, "Doc3.md");
+
+        await File.WriteAllTextAsync(note1, "Conteudo doc1 com termoComum");
+        await File.WriteAllTextAsync(note2, "Conteudo doc2 com termoComum");
+        await File.WriteAllTextAsync(note3, "Conteudo doc3 com termoComum");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        var mockAi = Substitute.For<IBrainAiProvider>();
+
+        var mockHybridSearch = Substitute.For<IHybridSearchService>();
+        mockHybridSearch.SearchAsync("termoComum", false, Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(AsAsyncEnumerable([
+                new HybridSearchResult("Doc1.md", 0.05, SearchMatchSource.IndexOnly, "snippet 1", []),
+                new HybridSearchResult("Doc2.md", 0.04, SearchMatchSource.IndexOnly, "snippet 2", []),
+                new HybridSearchResult("Doc3.md", 0.03, SearchMatchSource.IndexOnly, "snippet 3", [])
+            ]));
+
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi, hybridSearchService: mockHybridSearch);
+
+        // Act
+        var results = await ragEngine.SearchAsync("termoComum", _tempVaultDir, topK: 3);
+
+        // Assert:
+        results.Count.ShouldBe(3);
+
+        // PROVA MANDATÓRIA: com FTS5 suficiente (>= 3), IEmbeddingProvider recebe ZERO chamadas!
+        _ = mockEmbedding.DidNotReceiveWithAnyArgs().GenerateEmbeddingAsync(default!, default!);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenFtsHasFewerThanThreeResults_CallsEmbeddingProviderAsSafetyNet()
+    {
+        // Arrange: cofre com notas conceituais, mas FTS5 devolve 0 resultados
+        var note1 = Path.Combine(_tempVaultDir, "Filosofia.md");
+        await File.WriteAllTextAsync(note1, "Reflexões sobre epistemologia e consciência.");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 0f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+
+        var mockHybridSearch = Substitute.For<IHybridSearchService>();
+        // FTS5 devolve 0 resultados (vazio)
+        mockHybridSearch.SearchAsync(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(AsAsyncEnumerable(Array.Empty<HybridSearchResult>()));
+
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi, hybridSearchService: mockHybridSearch);
+        await ragEngine.IndexVaultAsync(_tempVaultDir);
+
+        // Act
+        var results = await ragEngine.SearchAsync("teoria do conhecimento", _tempVaultDir, topK: 1);
+
+        // Assert:
+        results.Count.ShouldBe(1);
+        results[0].Title.ShouldBe("Filosofia");
+
+        // PROVA MANDATÓRIA: quando o FTS5 não devolve o suficiente (< 3), a rede de segurança semântica é acionada!
+        _ = mockEmbedding.Received().GenerateEmbeddingAsync("teoria do conhecimento", Arg.Any<CancellationToken>());
+    }
 }

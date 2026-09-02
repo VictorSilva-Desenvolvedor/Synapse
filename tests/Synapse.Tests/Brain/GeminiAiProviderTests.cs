@@ -372,4 +372,57 @@ public class GeminiAiProviderTests
         generalHandler.CallCount.ShouldBe(1);
         chatHandler.CallCount.ShouldBe(1);
     }
+
+    private class CapturingHttpMessageHandler : HttpMessageHandler
+    {
+        public string? LastRequestBody { get; private set; }
+        private readonly string _responseContent;
+
+        public CapturingHttpMessageHandler(string responseContent)
+        {
+            _responseContent = responseContent;
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Content != null)
+            {
+                LastRequestBody = await request.Content.ReadAsStringAsync(cancellationToken);
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(_responseContent, System.Text.Encoding.UTF8, "application/json")
+            };
+        }
+    }
+
+    [Fact]
+    public async Task ProcessChatTurnAsync_SendsContextualizedExcerptWithTableToAiProvider()
+    {
+        var captureHandler = new CapturingHttpMessageHandler(@"{
+  ""candidates"": [
+    { ""content"": { ""parts"": [ { ""text"": ""{\""shouldCapture\"": false, \""title\"": null, \""category\"": null, \""tags\"": [], \""bodyMarkdown\"": null, \""keyPoints\"": [], \""suggestedConnections\"": [], \""shouldAnswer\"": true, \""replyMessage\"": \""Seus amigos são Felipe...\""}"" } ] } }
+  ]
+}");
+        var client = new HttpClient(captureHandler);
+        var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-3.6-flash" };
+        var provider = new GeminiAiProvider(config, client);
+
+        var tableExcerpt = "| Nome | Relacao | Detalhes |\n| Felipe | Amigo | Engenheiro de Software |";
+        var relatedNotes = new List<SemanticSearchResult>
+        {
+            new("Brain/Pessoas/Lista de Amigos.md", "Lista de Amigos", tableExcerpt, 0.95f)
+        };
+
+        var result = await provider.ProcessChatTurnAsync(
+            "me diga minha lista de amigos",
+            ["Lista de Amigos"],
+            ["Pessoas"],
+            relatedNotes);
+
+        captureHandler.LastRequestBody.ShouldNotBeNull();
+        // Prova que a IA recebe o trecho contextualizado com a tabela de amigos e os detalhes na íntegra
+        captureHandler.LastRequestBody.ShouldContain("- [[Lista de Amigos]]: | Nome | Relacao | Detalhes |");
+        captureHandler.LastRequestBody.ShouldContain("| Felipe | Amigo | Engenheiro de Software |");
+    }
 }

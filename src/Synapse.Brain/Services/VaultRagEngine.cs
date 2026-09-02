@@ -145,6 +145,47 @@ public sealed class VaultRagEngine : IVaultBrainQuery
     {
         if (string.IsNullOrWhiteSpace(query)) return [];
 
+        // 1. Prioridade para busca por software (FTS5 em ~2ms)
+        var lexicalMatches = new List<HybridSearchResult>();
+        if (HybridSearchService != null)
+        {
+            try
+            {
+                await foreach (var match in HybridSearchService.SearchAsync(query, isRegex: false, limit: Math.Max(topK, 10), ct: ct).ConfigureAwait(false))
+                {
+                    var fullPath = Path.Combine(vaultRootPath, match.FilePath);
+                    if (File.Exists(fullPath))
+                    {
+                        lexicalMatches.Add(match);
+                    }
+                }
+            }
+            catch
+            {
+                lexicalMatches.Clear();
+            }
+        }
+
+        // 2. Se o FTS5 devolver resultados suficientes (>= 3), retorna direto SEM chamar o IEmbeddingProvider!
+        // Caso comum gratuito: elimina 2,3s a 9,5s de carregamento de modelo / chamada ao Gemini.
+        const int SufficientLexicalThreshold = 3;
+        if (lexicalMatches.Count >= SufficientLexicalThreshold)
+        {
+            var topMatches = lexicalMatches.Take(topK).ToList();
+            var results = new List<SemanticSearchResult>(topMatches.Count);
+
+            foreach (var match in topMatches)
+            {
+                var title = Path.GetFileNameWithoutExtension(match.FilePath);
+                var excerpt = ReadExcerpt(vaultRootPath, match.FilePath, query, match.Snippet, match.RipgrepMatches);
+                results.Add(new SemanticSearchResult(match.FilePath, title, excerpt, (float)match.Score));
+            }
+
+            return EnforceGlobalContextBudget(results, maxChars: 16000);
+        }
+
+        // 3. Caso contrário (< 3 resultados, ex: pergunta puramente conceitual):
+        // Rede de segurança semântica entra em ação com IEmbeddingProvider
         if (_index.Count == 0)
         {
             await IndexVaultAsync(vaultRootPath, ct);
@@ -155,9 +196,7 @@ public sealed class VaultRagEngine : IVaultBrainQuery
         var queryVector = await _embeddingProvider.GenerateEmbeddingAsync(query, ct);
         var queryTokens = Tokenize(query);
 
-        // Rede de segurança: todas as notas seguem recebendo score semântico (recall total)
         var entriesWithSim = new List<(string RelativePath, string Title, NoteEmbeddingEntry Entry, float SemanticSimilarity)>(_index.Count);
-
         foreach (var (relativePath, entry) in _index)
         {
             var semanticSim = VectorMath.CosineSimilarity(queryVector, entry.Vector);
@@ -165,44 +204,29 @@ public sealed class VaultRagEngine : IVaultBrainQuery
             entriesWithSim.Add((relativePath, title, entry, semanticSim));
         }
 
-        // 1. Ranking Semântico (1-indexed) sobre todas as notas
+        // Ranking Semântico (1-indexed) sobre todas as notas
         var semanticRanking = entriesWithSim
             .OrderByDescending(e => e.SemanticSimilarity)
             .Select((item, idx) => (item.RelativePath, Rank: idx + 1))
             .ToDictionary(x => x.RelativePath, x => x.Rank, StringComparer.OrdinalIgnoreCase);
 
-        // 2. Ranking Léxico: obtido via IHybridSearchService (top ~200 em milissegundos)
-        // com degradação graciosa em caso de serviço nulo ou falha transitória
-        Dictionary<string, int>? lexicalRanking = null;
-        if (HybridSearchService != null)
+        // Ranking Léxico
+        Dictionary<string, int> lexicalRanking;
+        if (lexicalMatches.Count > 0)
         {
-            try
-            {
-                lexicalRanking = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                int rank = 1;
-                await foreach (var match in HybridSearchService.SearchAsync(query, isRegex: false, limit: 200, ct: ct).ConfigureAwait(false))
-                {
-                    if (!lexicalRanking.ContainsKey(match.FilePath))
-                    {
-                        lexicalRanking[match.FilePath] = rank++;
-                    }
-                }
-            }
-            catch
-            {
-                // Degradação graciosa para o comportamento antigo em caso de exceção no serviço
-                lexicalRanking = null;
-            }
+            lexicalRanking = lexicalMatches
+                .Select((m, idx) => (m.FilePath, Rank: idx + 1))
+                .ToDictionary(x => x.FilePath, x => x.Rank, StringComparer.OrdinalIgnoreCase);
         }
-
-        if (lexicalRanking == null)
+        else
         {
             lexicalRanking = ComputeLegacyLexicalRanking(queryTokens, entriesWithSim);
         }
 
-        // 3. Reciprocal Rank Fusion (RRF): score = 1/(60 + rank_sem) + (has_lex ? 1/(60 + rank_lex) : 0)
+        // Reciprocal Rank Fusion (RRF): score = 1/(60 + rank_sem) + (has_lex ? 1/(60 + rank_lex) : 0)
         const float k = 60f;
         var fusedResults = new List<SemanticSearchResult>(entriesWithSim.Count);
+        var matchLookup = lexicalMatches.ToDictionary(m => m.FilePath, StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in entriesWithSim)
         {
@@ -214,14 +238,9 @@ public sealed class VaultRagEngine : IVaultBrainQuery
                 : 0f;
 
             var finalScore = semScore + lexScore;
-
-            // Sem excerto aqui de proposito: ler o disco antes do Take(topK) faria uma abertura
-            // de arquivo por nota do cofre a cada consulta, e 99,9% dessas leituras seriam
-            // descartadas na linha seguinte. Num cofre grande isso dominava o custo da busca.
             fusedResults.Add(new SemanticSearchResult(item.RelativePath, item.Title, "", finalScore));
         }
 
-        // Corta primeiro, le o disco depois: so os topK sobreviventes tem excerto lido.
         var topResults = fusedResults
             .OrderByDescending(r => r.SimilarityScore)
             .Take(topK)
@@ -230,16 +249,32 @@ public sealed class VaultRagEngine : IVaultBrainQuery
         for (int i = 0; i < topResults.Count; i++)
         {
             var result = topResults[i];
-            topResults[i] = result with { Excerpt = ReadExcerpt(vaultRootPath, result.RelativePath) };
+            matchLookup.TryGetValue(result.RelativePath, out var m);
+            topResults[i] = result with
+            {
+                Excerpt = ReadExcerpt(vaultRootPath, result.RelativePath, query, m?.Snippet, m?.RipgrepMatches)
+            };
         }
 
-        return topResults;
+        return EnforceGlobalContextBudget(topResults, maxChars: 16000);
     }
 
     /// <summary>Contador de leituras de excerto em disco, para os testes provarem que so os topK sao lidos.</summary>
     internal static int ExcerptReadCount;
 
-    private static string ReadExcerpt(string vaultRootPath, string relativePath)
+    /// <summary>
+    /// Extrai o excerto adequado para o envio à IA:
+    /// - Nota pequena (&lt;= 4.000 chars): enviada por completo.
+    /// - Nota grande (&gt; 4.000 chars): enviada a passagem do casamento (+-10 linhas ao redor do match)
+    ///   para preservar tabelas e blocos inteiros; início do arquivo apenas como último recurso.
+    /// - Tags HTML são removidas.
+    /// </summary>
+    internal static string ReadExcerpt(
+        string vaultRootPath,
+        string relativePath,
+        string query = "",
+        string? snippet = null,
+        IReadOnlyList<RipgrepMatch>? ripgrepMatches = null)
     {
         var fullPath = Path.Combine(vaultRootPath, relativePath);
         if (!File.Exists(fullPath))
@@ -251,12 +286,170 @@ public sealed class VaultRagEngine : IVaultBrainQuery
 
         try
         {
-            return string.Join(" ", File.ReadLines(fullPath).Take(6));
+            var content = File.ReadAllText(fullPath);
+
+            // 1. Nota pequena (<= 4.000 chars) vai inteira
+            if (content.Length <= 4000)
+            {
+                return StripHtml(content);
+            }
+
+            // 2. Nota grande (> 4.000 chars): extrai +-10 linhas ao redor do match
+            var lines = content.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
+            int matchLineIndex = -1;
+
+            // Prioridade A: linha exata do match vinda do Ripgrep
+            if (ripgrepMatches != null && ripgrepMatches.Count > 0)
+            {
+                matchLineIndex = ripgrepMatches[0].LineNumber - 1;
+            }
+
+            // Prioridade B: localiza nas linhas onde a query ou termos aparecem
+            if (matchLineIndex < 0 && !string.IsNullOrWhiteSpace(query))
+            {
+                var queryTrimmed = query.Trim();
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (lines[i].Contains(queryTrimmed, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchLineIndex = i;
+                        break;
+                    }
+                }
+
+                if (matchLineIndex < 0)
+                {
+                    var tokens = Tokenize(query);
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        var lineTokens = Tokenize(lines[i]);
+                        if (tokens.Any(t => lineTokens.Contains(t)))
+                        {
+                            matchLineIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Prioridade C: localiza pelo texto do snippet FTS5
+            if (matchLineIndex < 0 && !string.IsNullOrWhiteSpace(snippet))
+            {
+                var cleanSnippet = StripHtml(snippet).Trim();
+                var snippetTerms = Tokenize(cleanSnippet);
+                if (snippetTerms.Count > 0)
+                {
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        var lineTokens = Tokenize(lines[i]);
+                        if (snippetTerms.Any(t => lineTokens.Contains(t)))
+                        {
+                            matchLineIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Se localizou a linha do match, extrai +- 10 linhas ao redor
+            if (matchLineIndex >= 0 && matchLineIndex < lines.Length)
+            {
+                int start = Math.Max(0, matchLineIndex - 10);
+                int count = Math.Min(lines.Length - start, (matchLineIndex + 10) - start + 1);
+                var passage = string.Join(Environment.NewLine, lines.Skip(start).Take(count));
+                return StripHtml(passage);
+            }
+
+            // Se não localizou a linha mas tem snippet FTS5 limpo, usa o snippet
+            if (!string.IsNullOrWhiteSpace(snippet))
+            {
+                return StripHtml(snippet);
+            }
+
+            // Último recurso: primeiras 20 linhas da nota
+            return StripHtml(string.Join(Environment.NewLine, lines.Take(20)));
         }
         catch
         {
             return "";
         }
+    }
+
+    internal static string StripHtml(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return "";
+        return Regex.Replace(input, @"<[^>]+>", "");
+    }
+
+    /// <summary>
+    /// Enforça o teto global de caracteres (~16.000) no contexto conjunto de notas,
+    /// cortando as notas menos relevantes primeiro e nunca cortando no meio de uma linha de tabela.
+    /// </summary>
+    internal static List<SemanticSearchResult> EnforceGlobalContextBudget(
+        IReadOnlyList<SemanticSearchResult> results,
+        int maxChars = 16000)
+    {
+        var output = new List<SemanticSearchResult>(results.Count);
+        int remainingBudget = maxChars;
+
+        foreach (var result in results)
+        {
+            if (remainingBudget <= 0)
+            {
+                break;
+            }
+
+            var excerpt = result.Excerpt;
+            if (string.IsNullOrEmpty(excerpt))
+            {
+                output.Add(result);
+                continue;
+            }
+
+            if (excerpt.Length <= remainingBudget)
+            {
+                output.Add(result);
+                remainingBudget -= excerpt.Length;
+            }
+            else
+            {
+                var trimmed = TrimExcerptToBudget(excerpt, remainingBudget);
+                if (!string.IsNullOrWhiteSpace(trimmed))
+                {
+                    output.Add(result with { Excerpt = trimmed });
+                    remainingBudget -= trimmed.Length;
+                }
+                break;
+            }
+        }
+
+        return output;
+    }
+
+    private static string TrimExcerptToBudget(string excerpt, int budget)
+    {
+        if (budget <= 0) return "";
+        var lines = excerpt.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
+        var sb = new StringBuilder();
+
+        foreach (var line in lines)
+        {
+            int cost = (sb.Length > 0 ? Environment.NewLine.Length : 0) + line.Length;
+            if (sb.Length + cost > budget)
+            {
+                // Para antes da linha que ultrapassaria o orçamento.
+                // Isso garante que nenhuma linha (especialmente de tabela | ... |) é cortada no meio.
+                break;
+            }
+
+            if (sb.Length > 0)
+            {
+                sb.AppendLine();
+            }
+            sb.Append(line);
+        }
+
+        return sb.ToString();
     }
 
     private static Dictionary<string, int> ComputeLegacyLexicalRanking(
@@ -310,18 +503,16 @@ public sealed class VaultRagEngine : IVaultBrainQuery
         var contextBuilder = new StringBuilder();
         foreach (var note in topNotes)
         {
-            var fullPath = Path.Combine(vaultRootPath, note.RelativePath);
-            if (File.Exists(fullPath))
+            var excerpt = !string.IsNullOrWhiteSpace(note.Excerpt)
+                ? note.Excerpt
+                : ReadExcerpt(vaultRootPath, note.RelativePath, question);
+
+            if (!string.IsNullOrWhiteSpace(excerpt))
             {
-                try
-                {
-                    var content = await File.ReadAllTextAsync(fullPath, ct);
-                    contextBuilder.AppendLine($"--- INÍCIO DA NOTA: [[{note.Title}]] ---");
-                    contextBuilder.AppendLine(content.Length > 2500 ? content[..2500] + "\n[...]" : content);
-                    contextBuilder.AppendLine($"--- FIM DA NOTA ---");
-                    contextBuilder.AppendLine();
-                }
-                catch { }
+                contextBuilder.AppendLine($"--- INÍCIO DA NOTA: [[{note.Title}]] ---");
+                contextBuilder.AppendLine(excerpt);
+                contextBuilder.AppendLine($"--- FIM DA NOTA ---");
+                contextBuilder.AppendLine();
             }
         }
 

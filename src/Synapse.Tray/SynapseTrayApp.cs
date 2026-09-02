@@ -12,6 +12,7 @@ using Synapse.Brain.Ports;
 using Synapse.Brain.Providers;
 using Synapse.Brain.Services;
 using Synapse.Core.Logging;
+using Synapse.Search;
 using Synapse.Sync.Auth;
 using Synapse.Sync.Config;
 using Synapse.Sync.GitHub;
@@ -56,7 +57,7 @@ public sealed class SynapseTrayApp : IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly SynapseConfigManager _configManager;
     private readonly Func<BrainConfig, VaultRagEngine> _ragEngineFactory;
-
+    private IHybridSearchService? _hybridSearchService;
     private IpcStatusPayload? _currentStatus;
     private OnboardingWindow? _settingsWindow;
     private bool _isDisposed;
@@ -401,8 +402,32 @@ public sealed class SynapseTrayApp : IDisposable
         VaultRagEngine? sharedRagEngine = null;
         if (!string.IsNullOrWhiteSpace(config.VaultPath) && Directory.Exists(config.VaultPath))
         {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var searchDbPath = Path.Combine(appData, "Synapse", "search_index.db");
+            _hybridSearchService = HybridSearchService.ForVault(searchDbPath);
+
             var brainConfig = BrainProviderFactory.BuildBrainConfig(config);
             sharedRagEngine = _ragEngineFactory(brainConfig);
+            if (sharedRagEngine.HybridSearchService == null)
+            {
+                sharedRagEngine.HybridSearchService = _hybridSearchService;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _hybridSearchService.InitializeAsync(config.VaultPath, ct: _remoteAgentCts.Token);
+                }
+                catch (Exception ex)
+                {
+                    _ = SynapseActivityLogger.Instance.LogActionAsync(
+                        "Search",
+                        "IndexFailed",
+                        status: "Failed",
+                        errorMessage: ex.Message);
+                }
+            }, _remoteAgentCts.Token);
 
             _ = Task.Run(async () =>
             {
@@ -576,6 +601,11 @@ public sealed class SynapseTrayApp : IDisposable
         try
         {
             _remoteAgentCts.Cancel();
+        }
+        catch { }
+        try
+        {
+            _hybridSearchService?.Dispose();
         }
         catch { }
         _ = _ipcClient.DisposeAsync();

@@ -66,7 +66,7 @@ public sealed class HybridSearchServiceTests : IDisposable
         }
 
         int progressReported = 0;
-        var progress = new Progress<int>(p => progressReported = p);
+        var progress = new SynchronousProgress<int>(p => progressReported = p);
 
         // Act
         await _service.InitializeAsync(_tempVaultDir, progress);
@@ -237,5 +237,10 @@ public sealed class HybridSearchServiceTests : IDisposable
             {
             }
         });
+    }
+
+    private sealed class SynchronousProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
     }
 }

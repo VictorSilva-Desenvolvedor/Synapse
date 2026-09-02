@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 
 namespace Synapse.Search;
 
@@ -288,13 +289,15 @@ public sealed class VaultIndexWatcher : IVaultIndexWatcher
 
     private static async Task<string?> ReadFileWithRetryAsync(string fullPath, CancellationToken ct)
     {
-        const int maxRetries = 3;
+        const int maxRetries = 5;
         for (int i = 0; i < maxRetries; i++)
         {
             try
             {
                 ct.ThrowIfCancellationRequested();
-                return await File.ReadAllTextAsync(fullPath, ct).ConfigureAwait(false);
+                using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                return await reader.ReadToEndAsync(ct).ConfigureAwait(false);
             }
             catch (IOException) when (i < maxRetries - 1)
             {

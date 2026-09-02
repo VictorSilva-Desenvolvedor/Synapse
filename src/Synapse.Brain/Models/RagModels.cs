@@ -1,3 +1,5 @@
+using Synapse.Brain.Services;
+
 namespace Synapse.Brain.Models;
 
 public sealed record NoteEmbeddingEntry(
@@ -5,9 +7,13 @@ public sealed record NoteEmbeddingEntry(
     string ContentHash,
     float[] Vector,
     DateTimeOffset UpdatedAt,
-    IReadOnlyList<string>? Tokens = null)
+    IReadOnlyList<string>? Tokens = null,
+    IReadOnlySet<string>? TokenSet = null,
+    IReadOnlySet<string>? TitleTokenSet = null)
 {
     public IReadOnlyList<string> Tokens { get; init; } = Tokens ?? [];
+    public IReadOnlySet<string> TokenSet { get; init; } = TokenSet ?? new HashSet<string>(Tokens ?? [], StringComparer.OrdinalIgnoreCase);
+    public IReadOnlySet<string> TitleTokenSet { get; init; } = TitleTokenSet ?? new HashSet<string>(VaultRagEngine.Tokenize(Path.GetFileNameWithoutExtension(RelativePath)), StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed record SemanticSearchResult(

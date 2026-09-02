@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Synapse.Core\Synapse.Core.csproj" />
+    <ProjectReference Include="..\Synapse.Search\Synapse.Search.csproj" />
   </ItemGroup>
 
   <ItemGroup>

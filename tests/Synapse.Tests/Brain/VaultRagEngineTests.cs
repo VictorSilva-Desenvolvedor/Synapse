@@ -3,6 +3,7 @@ using Shouldly;
 using Synapse.Brain.Models;
 using Synapse.Brain.Ports;
 using Synapse.Brain.Services;
+using Synapse.Search;
 
 namespace Synapse.Tests.Brain;
 
@@ -393,11 +394,273 @@ public class VaultRagEngineTests : IDisposable
         results[0].SimilarityScore.ShouldBeGreaterThan(results[1].SimilarityScore);
     }
 
+    [Fact]
+    public async Task SearchAsync_PathAlignment_KeysMatchExactlyForRootAndSubfolders()
+    {
+        var rootFile = Path.Combine(_tempVaultDir, "NotaRaiz.md");
+        var subDir = Path.Combine(_tempVaultDir, "Projetos", "Arquitetura");
+        Directory.CreateDirectory(subDir);
+        var subFile = Path.Combine(subDir, "PadraoHexagonal.md");
+
+        await File.WriteAllTextAsync(rootFile, "Conteúdo da nota raiz.");
+        await File.WriteAllTextAsync(subFile, "Conteúdo da nota na subpasta sobre Hexagonal.");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 0f, 0f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi);
+
+        await ragEngine.IndexVaultAsync(_tempVaultDir);
+
+        var canonicalRoot = HybridSearchEngine.ToCanonicalRelativePath(rootFile, _tempVaultDir);
+        var canonicalSub = HybridSearchEngine.ToCanonicalRelativePath(subFile, _tempVaultDir);
+
+        canonicalRoot.ShouldBe("NotaRaiz.md");
+        canonicalSub.ShouldBe("Projetos/Arquitetura/PadraoHexagonal.md");
+
+        var mockHybridSearch = Substitute.For<IHybridSearchService>();
+        mockHybridSearch.SearchAsync("Hexagonal", Arg.Any<bool>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(AsAsyncEnumerable([
+                new HybridSearchResult(canonicalSub, 0.05, SearchMatchSource.Both, "snippet", [])
+            ]));
+
+        ragEngine.HybridSearchService = mockHybridSearch;
+
+        var results = await ragEngine.SearchAsync("Hexagonal", _tempVaultDir, topK: 2);
+
+        results.Count.ShouldBe(2);
+        results[0].RelativePath.ShouldBe("Projetos/Arquitetura/PadraoHexagonal.md");
+        results[0].Title.ShouldBe("PadraoHexagonal");
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithHybridSearchService_LiteralTermRanksTop()
+    {
+        var note1 = Path.Combine(_tempVaultDir, "NotaA.md");
+        var note2 = Path.Combine(_tempVaultDir, "NotaB.md");
+
+        await File.WriteAllTextAsync(note1, "Nota geral com similaridade semântica razoável.");
+        await File.WriteAllTextAsync(note2, "Nota contendo TermoLiteralExclusivo.");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync("TermoLiteralExclusivo", Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 0f }));
+
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Is<string>(s => s.Contains("Nota geral")), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 0f }));
+
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Is<string>(s => s.Contains("TermoLiteralExclusivo")), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 0.5f, 0.5f }));
+
+        var mockHybridSearch = Substitute.For<IHybridSearchService>();
+        mockHybridSearch.SearchAsync("TermoLiteralExclusivo", false, 200, Arg.Any<CancellationToken>())
+            .Returns(AsAsyncEnumerable([
+                new HybridSearchResult("NotaB.md", 0.05, SearchMatchSource.Both, "TermoLiteralExclusivo", [])
+            ]));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi, hybridSearchService: mockHybridSearch);
+
+        var results = await ragEngine.SearchAsync("TermoLiteralExclusivo", _tempVaultDir, topK: 2);
+
+        results[0].Title.ShouldBe("NotaB");
+    }
+
+    [Fact]
+    public async Task SearchAsync_ConceptualMatchWithoutCommonWords_StillAppearsInResults()
+    {
+        var noteSemelhante = Path.Combine(_tempVaultDir, "ConceitoSemelhante.md");
+        var noteLiteral = Path.Combine(_tempVaultDir, "OutroAssunto.md");
+
+        await File.WriteAllTextAsync(noteSemelhante, "Texto puramente conceitual sem nenhuma palavra em comum.");
+        await File.WriteAllTextAsync(noteLiteral, "Texto falando de cachorros e gatos.");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync("felinos caninos", Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 0.99f, 0.01f }));
+
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Is<string>(s => s.Contains("conceitual")), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 0.99f, 0.01f }));
+
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Is<string>(s => s.Contains("cachorros")), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 0.10f, 0.90f }));
+
+        var mockHybridSearch = Substitute.For<IHybridSearchService>();
+        mockHybridSearch.SearchAsync("felinos caninos", false, 200, Arg.Any<CancellationToken>())
+            .Returns(AsAsyncEnumerable([
+                new HybridSearchResult("OutroAssunto.md", 0.05, SearchMatchSource.Both, "gatos", [])
+            ]));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi, hybridSearchService: mockHybridSearch);
+
+        var results = await ragEngine.SearchAsync("felinos caninos", _tempVaultDir, topK: 2);
+
+        results.Any(r => r.Title == "ConceitoSemelhante").ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenHybridSearchServiceIsNull_PreservesLegacyBehavior()
+    {
+        var note = Path.Combine(_tempVaultDir, "NotaLegada.md");
+        await File.WriteAllTextAsync(note, "Conteúdo da nota legado com TermoLegadoUnico.");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 0f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi, hybridSearchService: null);
+
+        var results = await ragEngine.SearchAsync("TermoLegadoUnico", _tempVaultDir, topK: 1);
+
+        results.Count.ShouldBe(1);
+        results[0].Title.ShouldBe("NotaLegada");
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenHybridSearchServiceThrows_DegradesGracefullyWithoutThrowing()
+    {
+        var note = Path.Combine(_tempVaultDir, "NotaResiliente.md");
+        await File.WriteAllTextAsync(note, "Conteúdo com TermoResiliente para teste de fallback.");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 0f }));
+
+        var mockHybridSearch = Substitute.For<IHybridSearchService>();
+        mockHybridSearch.SearchAsync(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(ThrowingAsyncEnumerable());
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi, hybridSearchService: mockHybridSearch);
+
+        var results = await ragEngine.SearchAsync("TermoResiliente", _tempVaultDir, topK: 1);
+
+        results.Count.ShouldBe(1);
+        results[0].Title.ShouldBe("NotaResiliente");
+    }
+
+    [Fact]
+    public void NoteEmbeddingEntry_TokensArePrecomputedAtConstruction()
+    {
+        var entry = new NoteEmbeddingEntry(
+            "MinhaPasta/Nota.md",
+            "hash123",
+            [0.1f, 0.2f],
+            DateTimeOffset.UtcNow,
+            ["palavra1", "palavra2"]);
+
+        entry.TokenSet.ShouldNotBeNull();
+        entry.TokenSet.Count.ShouldBe(2);
+        entry.TokenSet.Contains("PALAVRA1").ShouldBeTrue();
+        entry.TokenSet.Contains("palavra2").ShouldBeTrue();
+        entry.TokenSet.Contains("inexistente").ShouldBeFalse();
+
+        entry.TitleTokenSet.ShouldNotBeNull();
+        entry.TitleTokenSet.Contains("Nota").ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task FileVaultIndexStore_LoadsLegacyFormatAndPopulatesTokenSets()
+    {
+        var tempIndexDir = Path.Combine(Path.GetTempPath(), $"synapse-idx-compat-{Guid.NewGuid():N}");
+        try
+        {
+            var store = new FileVaultIndexStore(tempIndexDir);
+            var entry = new NoteEmbeddingEntry(
+                "Docs/Guia.md",
+                "hash456",
+                [0.5f, 0.5f],
+                DateTimeOffset.UtcNow,
+                ["guia", "rapido"]);
+
+            var dict = new Dictionary<string, NoteEmbeddingEntry> { ["Docs/Guia.md"] = entry };
+            await store.SaveAsync(_tempVaultDir, dict);
+
+            var loaded = await store.LoadAsync(_tempVaultDir);
+
+            loaded.ShouldNotBeNull();
+            loaded.ContainsKey("Docs/Guia.md").ShouldBeTrue();
+
+            var loadedEntry = loaded["Docs/Guia.md"];
+            loadedEntry.TokenSet.ShouldNotBeNull();
+            loadedEntry.TokenSet.Contains("guia").ShouldBeTrue();
+            loadedEntry.TokenSet.Contains("GUIA").ShouldBeTrue();
+            loadedEntry.TitleTokenSet.ShouldNotBeNull();
+            loadedEntry.TitleTokenSet.Contains("Guia").ShouldBeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(tempIndexDir))
+            {
+                try { Directory.Delete(tempIndexDir, true); } catch { }
+            }
+        }
+    }
+
+    private static async IAsyncEnumerable<HybridSearchResult> AsAsyncEnumerable(IEnumerable<HybridSearchResult> items)
+    {
+        await Task.Yield();
+        foreach (var item in items)
+        {
+            yield return item;
+        }
+    }
+
+    private static async IAsyncEnumerable<HybridSearchResult> ThrowingAsyncEnumerable()
+    {
+        await Task.Yield();
+        throw new InvalidOperationException("Falha simulada no motor de busca hibrido.");
+#pragma warning disable CS0162
+        yield break;
+#pragma warning restore CS0162
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempVaultDir))
         {
             try { Directory.Delete(_tempVaultDir, true); } catch { }
         }
+    }
+
+    [Fact]
+    public async Task SearchAsync_ReadsExcerptsOnlyForTopKResults_NotForEveryNoteInTheVault()
+    {
+        // Arrange - 40 notas no cofre, mas a busca pede so 3. Ler o disco antes do corte
+        // significaria 40 aberturas de arquivo por consulta; num cofre real de centenas de
+        // milhares de notas era esse o custo dominante da busca.
+        const int totalNotes = 40;
+        const int topK = 3;
+
+        for (int i = 0; i < totalNotes; i++)
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(_tempVaultDir, $"nota_{i}.md"),
+                $"Conteudo da nota {i} sobre arquitetura de software.");
+        }
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 0f, 0f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi);
+
+        await ragEngine.IndexVaultAsync(_tempVaultDir);
+
+        // Act
+        VaultRagEngine.ExcerptReadCount = 0;
+        var results = await ragEngine.SearchAsync("arquitetura", _tempVaultDir, topK: topK);
+
+        // Assert
+        results.Count.ShouldBe(topK);
+        VaultRagEngine.ExcerptReadCount.ShouldBe(topK);
+
+        // E o excerto dos sobreviventes continua sendo preenchido de verdade
+        results.ShouldAllBe(r => r.Excerpt.Length > 0);
     }
 }

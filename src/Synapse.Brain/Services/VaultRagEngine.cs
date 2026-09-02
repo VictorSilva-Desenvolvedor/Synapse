@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Synapse.Brain.Models;
 using Synapse.Brain.Ports;
+using Synapse.Search;
 
 namespace Synapse.Brain.Services;
 
@@ -25,16 +26,20 @@ public sealed class VaultRagEngine : IVaultBrainQuery
     // notas nunca quebrava; bastava uma nota nova durante uma pergunta.
     private readonly ConcurrentDictionary<string, NoteEmbeddingEntry> _index = new(StringComparer.OrdinalIgnoreCase);
 
+    public IHybridSearchService? HybridSearchService { get; set; }
+
     public VaultRagEngine(
         IEmbeddingProvider embeddingProvider,
         IBrainAiProvider aiProvider,
         BrainConfig? config = null,
-        IVaultIndexStore? indexStore = null)
+        IVaultIndexStore? indexStore = null,
+        IHybridSearchService? hybridSearchService = null)
     {
         _embeddingProvider = embeddingProvider;
         _aiProvider = aiProvider;
         _config = config ?? new BrainConfig();
         _indexStore = indexStore ?? new FileVaultIndexStore();
+        HybridSearchService = hybridSearchService;
     }
 
     public async Task IndexVaultAsync(string vaultRootPath, CancellationToken ct = default)
@@ -61,7 +66,7 @@ public sealed class VaultRagEngine : IVaultBrainQuery
             .ToList();
 
         var currentRelativePaths = new HashSet<string>(
-            files.Select(f => Path.GetRelativePath(vaultRootPath, f).Replace('\\', '/')),
+            files.Select(f => HybridSearchEngine.ToCanonicalRelativePath(f, vaultRootPath)),
             StringComparer.OrdinalIgnoreCase);
 
         var removedAny = false;
@@ -77,7 +82,7 @@ public sealed class VaultRagEngine : IVaultBrainQuery
         {
             if (ct.IsCancellationRequested) break;
 
-            var relativePath = Path.GetRelativePath(vaultRootPath, file).Replace('\\', '/');
+            var relativePath = HybridSearchEngine.ToCanonicalRelativePath(file, vaultRootPath);
             string text;
             try
             {
@@ -108,8 +113,10 @@ public sealed class VaultRagEngine : IVaultBrainQuery
                     var vector = await _embeddingProvider.GenerateEmbeddingAsync(item.Text, ct);
                     var title = Path.GetFileNameWithoutExtension(item.RelativePath);
                     var tokens = Tokenize(title, item.Text);
+                    var tokenSet = new HashSet<string>(tokens, StringComparer.OrdinalIgnoreCase);
+                    var titleTokenSet = new HashSet<string>(Tokenize(title), StringComparer.OrdinalIgnoreCase);
                     // Sem lock: a atribuicao pelo indexador do ConcurrentDictionary ja e atomica.
-                    _index[item.RelativePath] = new NoteEmbeddingEntry(item.RelativePath, item.Hash, vector, DateTimeOffset.UtcNow, tokens);
+                    _index[item.RelativePath] = new NoteEmbeddingEntry(item.RelativePath, item.Hash, vector, DateTimeOffset.UtcNow, tokens, tokenSet, titleTokenSet);
                 }
                 catch
                 {
@@ -148,55 +155,56 @@ public sealed class VaultRagEngine : IVaultBrainQuery
         var queryVector = await _embeddingProvider.GenerateEmbeddingAsync(query, ct);
         var queryTokens = Tokenize(query);
 
-        var entriesWithScores = new List<(string RelativePath, string Title, NoteEmbeddingEntry Entry, float SemanticSimilarity, float LexicalScore)>();
+        // Rede de segurança: todas as notas seguem recebendo score semântico (recall total)
+        var entriesWithSim = new List<(string RelativePath, string Title, NoteEmbeddingEntry Entry, float SemanticSimilarity)>(_index.Count);
 
         foreach (var (relativePath, entry) in _index)
         {
             var semanticSim = VectorMath.CosineSimilarity(queryVector, entry.Vector);
             var title = Path.GetFileNameWithoutExtension(relativePath);
-            var titleTokens = Tokenize(title);
-            var titleTokenSet = new HashSet<string>(titleTokens, StringComparer.OrdinalIgnoreCase);
-            var noteTokenSet = new HashSet<string>(entry.Tokens ?? [], StringComparer.OrdinalIgnoreCase);
-
-            float lexicalScore = 0f;
-            if (queryTokens.Count > 0)
-            {
-                float matchedWeight = 0f;
-                foreach (var qt in queryTokens)
-                {
-                    if (titleTokenSet.Contains(qt))
-                    {
-                        matchedWeight += 3.0f; // Peso maior para match no título
-                    }
-                    else if (noteTokenSet.Contains(qt))
-                    {
-                        matchedWeight += 1.0f;
-                    }
-                }
-                lexicalScore = matchedWeight / (queryTokens.Count * 3.0f);
-            }
-
-            entriesWithScores.Add((relativePath, title, entry, semanticSim, lexicalScore));
+            entriesWithSim.Add((relativePath, title, entry, semanticSim));
         }
 
-        // 1. Ranking Semântico (1-indexed)
-        var semanticRanking = entriesWithScores
+        // 1. Ranking Semântico (1-indexed) sobre todas as notas
+        var semanticRanking = entriesWithSim
             .OrderByDescending(e => e.SemanticSimilarity)
             .Select((item, idx) => (item.RelativePath, Rank: idx + 1))
             .ToDictionary(x => x.RelativePath, x => x.Rank, StringComparer.OrdinalIgnoreCase);
 
-        // 2. Ranking Léxico (apenas para quem tem score léxico > 0)
-        var lexicalRanking = entriesWithScores
-            .Where(e => e.LexicalScore > 0)
-            .OrderByDescending(e => e.LexicalScore)
-            .Select((item, idx) => (item.RelativePath, Rank: idx + 1))
-            .ToDictionary(x => x.RelativePath, x => x.Rank, StringComparer.OrdinalIgnoreCase);
+        // 2. Ranking Léxico: obtido via IHybridSearchService (top ~200 em milissegundos)
+        // com degradação graciosa em caso de serviço nulo ou falha transitória
+        Dictionary<string, int>? lexicalRanking = null;
+        if (HybridSearchService != null)
+        {
+            try
+            {
+                lexicalRanking = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                int rank = 1;
+                await foreach (var match in HybridSearchService.SearchAsync(query, isRegex: false, limit: 200, ct: ct).ConfigureAwait(false))
+                {
+                    if (!lexicalRanking.ContainsKey(match.FilePath))
+                    {
+                        lexicalRanking[match.FilePath] = rank++;
+                    }
+                }
+            }
+            catch
+            {
+                // Degradação graciosa para o comportamento antigo em caso de exceção no serviço
+                lexicalRanking = null;
+            }
+        }
+
+        if (lexicalRanking == null)
+        {
+            lexicalRanking = ComputeLegacyLexicalRanking(queryTokens, entriesWithSim);
+        }
 
         // 3. Reciprocal Rank Fusion (RRF): score = 1/(60 + rank_sem) + (has_lex ? 1/(60 + rank_lex) : 0)
         const float k = 60f;
-        var fusedResults = new List<SemanticSearchResult>();
+        var fusedResults = new List<SemanticSearchResult>(entriesWithSim.Count);
 
-        foreach (var item in entriesWithScores)
+        foreach (var item in entriesWithSim)
         {
             var semRank = semanticRanking[item.RelativePath];
             var semScore = 1f / (k + semRank);
@@ -207,25 +215,83 @@ public sealed class VaultRagEngine : IVaultBrainQuery
 
             var finalScore = semScore + lexScore;
 
-            var fullPath = Path.Combine(vaultRootPath, item.RelativePath);
-            var excerpt = "";
-            if (File.Exists(fullPath))
-            {
-                try
-                {
-                    var lines = File.ReadLines(fullPath).Take(6);
-                    excerpt = string.Join(" ", lines);
-                }
-                catch { }
-            }
-
-            fusedResults.Add(new SemanticSearchResult(item.RelativePath, item.Title, excerpt, finalScore));
+            // Sem excerto aqui de proposito: ler o disco antes do Take(topK) faria uma abertura
+            // de arquivo por nota do cofre a cada consulta, e 99,9% dessas leituras seriam
+            // descartadas na linha seguinte. Num cofre grande isso dominava o custo da busca.
+            fusedResults.Add(new SemanticSearchResult(item.RelativePath, item.Title, "", finalScore));
         }
 
-        return fusedResults
+        // Corta primeiro, le o disco depois: so os topK sobreviventes tem excerto lido.
+        var topResults = fusedResults
             .OrderByDescending(r => r.SimilarityScore)
             .Take(topK)
             .ToList();
+
+        for (int i = 0; i < topResults.Count; i++)
+        {
+            var result = topResults[i];
+            topResults[i] = result with { Excerpt = ReadExcerpt(vaultRootPath, result.RelativePath) };
+        }
+
+        return topResults;
+    }
+
+    /// <summary>Contador de leituras de excerto em disco, para os testes provarem que so os topK sao lidos.</summary>
+    internal static int ExcerptReadCount;
+
+    private static string ReadExcerpt(string vaultRootPath, string relativePath)
+    {
+        var fullPath = Path.Combine(vaultRootPath, relativePath);
+        if (!File.Exists(fullPath))
+        {
+            return "";
+        }
+
+        Interlocked.Increment(ref ExcerptReadCount);
+
+        try
+        {
+            return string.Join(" ", File.ReadLines(fullPath).Take(6));
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static Dictionary<string, int> ComputeLegacyLexicalRanking(
+        List<string> queryTokens,
+        List<(string RelativePath, string Title, NoteEmbeddingEntry Entry, float SemanticSimilarity)> entries)
+    {
+        if (queryTokens.Count == 0) return new(StringComparer.OrdinalIgnoreCase);
+
+        var scores = new List<(string RelativePath, float LexicalScore)>();
+        foreach (var item in entries)
+        {
+            float matchedWeight = 0f;
+            foreach (var qt in queryTokens)
+            {
+                if (item.Entry.TitleTokenSet.Contains(qt))
+                {
+                    matchedWeight += 3.0f; // Peso maior para match no título
+                }
+                else if (item.Entry.TokenSet.Contains(qt))
+                {
+                    matchedWeight += 1.0f;
+                }
+            }
+
+            var score = matchedWeight / (queryTokens.Count * 3.0f);
+            if (score > 0)
+            {
+                scores.Add((item.RelativePath, score));
+            }
+        }
+
+        return scores
+            .OrderByDescending(s => s.LexicalScore)
+            .Select((s, idx) => (s.RelativePath, Rank: idx + 1))
+            .ToDictionary(x => x.RelativePath, x => x.Rank, StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<RagAnswer> AskVaultAsync(
@@ -402,7 +468,9 @@ Pergunta do usuário:
                     var hash = ComputeSha256(noteContent);
                     var title = Path.GetFileNameWithoutExtension(savedNotePath);
                     var tokens = Tokenize(title, noteContent);
-                    _index[savedNotePath] = new NoteEmbeddingEntry(savedNotePath, hash, vector, DateTimeOffset.UtcNow, tokens);
+                    var tokenSet = new HashSet<string>(tokens, StringComparer.OrdinalIgnoreCase);
+                    var titleTokenSet = new HashSet<string>(Tokenize(title), StringComparer.OrdinalIgnoreCase);
+                    _index[savedNotePath] = new NoteEmbeddingEntry(savedNotePath, hash, vector, DateTimeOffset.UtcNow, tokens, tokenSet, titleTokenSet);
                     await _indexStore.SaveAsync(vaultRootPath, _index, ct);
                 }
                 catch

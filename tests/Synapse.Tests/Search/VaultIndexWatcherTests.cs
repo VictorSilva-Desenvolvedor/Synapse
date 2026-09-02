@@ -47,6 +47,41 @@ public sealed class VaultIndexWatcherTests : IDisposable
         catch { }
     }
 
+    /// <summary>
+    /// Aguarda o indice refletir o resultado esperado, em vez de dormir um tempo fixo.
+    /// Um Task.Delay calibrado na maquina de desenvolvimento nao cobre o runner do CI, que roda a
+    /// suite inteira em paralelo em dois nucleos - foi assim que FileRenamed quebrou o pipeline
+    /// esperando 250ms por um evento do FileSystemWatcher que la demorava mais. Com polling o teste
+    /// continua rapido localmente (sai assim que a condicao bate) e tolerante sob carga.
+    /// </summary>
+    private Task<List<VaultSearchResult>> AguardarResultados(string termo, int esperado, int timeoutMs = 15000) =>
+        AguardarCondicao(termo, r => r.Count == esperado, timeoutMs);
+
+    private async Task<List<VaultSearchResult>> AguardarCondicao(
+        string termo,
+        Func<List<VaultSearchResult>, bool> condicao,
+        int timeoutMs = 15000)
+    {
+        var limite = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        var encontrados = new List<VaultSearchResult>();
+
+        while (true)
+        {
+            encontrados.Clear();
+            await foreach (var r in _searchIndex.SearchAsync(termo))
+            {
+                encontrados.Add(r);
+            }
+
+            if (condicao(encontrados) || DateTime.UtcNow >= limite)
+            {
+                return encontrados;
+            }
+
+            await Task.Delay(50);
+        }
+    }
+
     [Fact]
     public async Task FileCreated_AfterDebounce_IsIndexedInSearchIndex()
     {
@@ -54,15 +89,8 @@ public sealed class VaultIndexWatcherTests : IDisposable
         var note = Path.Combine(_tempVaultDir, "nova_nota.md");
         await File.WriteAllTextAsync(note, "Conteudo com termoCriadoWatcher para teste.");
 
-        // Aguarda o debounce (50ms) + processamento I/O
-        await Task.Delay(250);
-
         // Assert
-        var results = new List<VaultSearchResult>();
-        await foreach (var r in _searchIndex.SearchAsync("termoCriadoWatcher"))
-        {
-            results.Add(r);
-        }
+        var results = await AguardarResultados("termoCriadoWatcher", esperado: 1);
 
         results.Count.ShouldBe(1);
         results[0].FilePath.ShouldBe("nova_nota.md");
@@ -74,25 +102,16 @@ public sealed class VaultIndexWatcherTests : IDisposable
         // Arrange
         var note = Path.Combine(_tempVaultDir, "nota_editavel.md");
         await File.WriteAllTextAsync(note, "Versao inicial com termoAntigoWatcher.");
-        await Task.Delay(250);
+        await AguardarResultados("termoAntigoWatcher", esperado: 1);
 
         // Act - Edita o arquivo
         await File.WriteAllTextAsync(note, "Versao atualizada com termoNovoWatcher substituindo.");
-        await Task.Delay(250);
 
         // Assert
-        var resultsAntigo = new List<VaultSearchResult>();
-        await foreach (var r in _searchIndex.SearchAsync("termoAntigoWatcher"))
-        {
-            resultsAntigo.Add(r);
-        }
-        resultsAntigo.ShouldBeEmpty();
+        var resultsNovo = await AguardarResultados("termoNovoWatcher", esperado: 1);
+        var resultsAntigo = await AguardarResultados("termoAntigoWatcher", esperado: 0);
 
-        var resultsNovo = new List<VaultSearchResult>();
-        await foreach (var r in _searchIndex.SearchAsync("termoNovoWatcher"))
-        {
-            resultsNovo.Add(r);
-        }
+        resultsAntigo.ShouldBeEmpty();
         resultsNovo.Count.ShouldBe(1);
         resultsNovo[0].FilePath.ShouldBe("nota_editavel.md");
     }
@@ -103,23 +122,15 @@ public sealed class VaultIndexWatcherTests : IDisposable
         // Arrange
         var note = Path.Combine(_tempVaultDir, "nota_para_deletar.md");
         await File.WriteAllTextAsync(note, "Conteudo com termoDeletarWatcher.");
-        await Task.Delay(250);
-
-        (await _searchIndex.GetIndexedFileCountAsync()).ShouldBe(1);
+        (await AguardarResultados("termoDeletarWatcher", esperado: 1)).Count.ShouldBe(1);
 
         // Act
         File.Delete(note);
-        await Task.Delay(250);
 
         // Assert
-        (await _searchIndex.GetIndexedFileCountAsync()).ShouldBe(0);
-
-        var results = new List<VaultSearchResult>();
-        await foreach (var r in _searchIndex.SearchAsync("termoDeletarWatcher"))
-        {
-            results.Add(r);
-        }
+        var results = await AguardarResultados("termoDeletarWatcher", esperado: 0);
         results.ShouldBeEmpty();
+        (await _searchIndex.GetIndexedFileCountAsync()).ShouldBe(0);
     }
 
     [Fact]
@@ -130,18 +141,16 @@ public sealed class VaultIndexWatcherTests : IDisposable
         var newFile = Path.Combine(_tempVaultDir, "novo_nome.md");
 
         await File.WriteAllTextAsync(oldFile, "Conteudo com termoRenomearWatcher.");
-        await Task.Delay(250);
+        await AguardarResultados("termoRenomearWatcher", esperado: 1);
 
         // Act
         File.Move(oldFile, newFile);
-        await Task.Delay(250);
 
-        // Assert
-        var results = new List<VaultSearchResult>();
-        await foreach (var r in _searchIndex.SearchAsync("termoRenomearWatcher"))
-        {
-            results.Add(r);
-        }
+        // Assert - aguarda o caminho NOVO especificamente. Esperar so "1 resultado" retornaria de
+        // imediato, porque o caminho antigo ainda conta 1 ate o watcher processar a renomeacao.
+        var results = await AguardarCondicao(
+            "termoRenomearWatcher",
+            r => r.Count == 1 && r[0].FilePath == "novo_nome.md");
 
         results.Count.ShouldBe(1);
         results[0].FilePath.ShouldBe("novo_nome.md");

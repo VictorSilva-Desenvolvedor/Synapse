@@ -11,7 +11,11 @@ jobs:
   build-and-test:
     name: Build & Test
     runs-on: windows-latest
-    timeout-minutes: 10
+    # 20min, nao 10: a suite roda em ~12s na maquina de desenvolvimento, mas o runner tem 2 nucleos e
+    # o xunit paraleliza as colecoes, entao os testes ficam bloqueados disputando CPU e o relogio de
+    # cada um infla - ate "apagar um arquivo" aparece com 22s no log. O trabalho e o mesmo; o que
+    # estoura e o tempo de parede. Com 10min o pipeline vinha sendo cancelado no meio da suite.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Repository

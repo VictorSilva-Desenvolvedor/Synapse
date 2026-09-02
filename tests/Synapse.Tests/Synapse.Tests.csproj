@@ -42,6 +42,7 @@
     <ProjectReference Include="..\..\src\Synapse.Tray\Synapse.Tray.csproj" />
     <ProjectReference Include="..\..\src\Synapse.Brain\Synapse.Brain.csproj" />
     <ProjectReference Include="..\..\src\Synapse.Agent\Synapse.Agent.csproj" />
+    <ProjectReference Include="..\..\src\Synapse.Search\Synapse.Search.csproj" />
   </ItemGroup>
 
 </Project>

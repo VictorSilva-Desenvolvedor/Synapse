@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Synapse.Core\Synapse.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Synapse.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Tools\rg.exe" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Tools\rg-LICENSE-MIT.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Tools\rg-UNLICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

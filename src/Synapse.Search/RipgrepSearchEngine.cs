@@ -14,6 +14,8 @@ public sealed class RipgrepSearchEngine : IRawSearchEngine
         _rgPath = customRgPath ?? ResolveRipgrepPath();
     }
 
+    internal Action<Process>? OnProcessStarted { get; set; }
+
     public async IAsyncEnumerable<RipgrepMatch> SearchAsync(
         string vaultRootPath,
         string pattern,
@@ -54,12 +56,16 @@ public sealed class RipgrepSearchEngine : IRawSearchEngine
         psi.ArgumentList.Add(pattern);
         psi.ArgumentList.Add(vaultRootPath);
 
+        ct.ThrowIfCancellationRequested();
+
         using var process = new Process { StartInfo = psi };
 
         if (!process.Start())
         {
             throw new InvalidOperationException($"Failed to start ripgrep process at '{_rgPath}'.");
         }
+
+        OnProcessStarted?.Invoke(process);
 
         using var registration = ct.Register(() =>
         {
@@ -129,6 +135,7 @@ public sealed class RipgrepSearchEngine : IRawSearchEngine
                 if (!process.HasExited)
                 {
                     process.Kill(entireProcessTree: true);
+                    process.WaitForExit(1000);
                 }
             }
             catch

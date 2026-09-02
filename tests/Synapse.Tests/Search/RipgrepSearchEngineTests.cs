@@ -166,23 +166,43 @@ public sealed class RipgrepSearchEngineTests : IDisposable
                 $"Line {i} content repeated: " + string.Join(" ", Enumerable.Range(0, 100).Select(x => $"word_{x}")));
         }
 
-        using var cts = new CancellationTokenSource();
-        cts.Cancel(); // Pre-cancelled token
+        int spawnedPid = 0;
+        _engine.OnProcessStarted = p =>
+        {
+            try
+            {
+                spawnedPid = p.Id;
+            }
+            catch { }
+        };
 
-        // Act & Assert
+        using var cts = new CancellationTokenSource();
+
+        // Act & Assert - cancel during iteration
         await Should.ThrowAsync<OperationCanceledException>(async () =>
         {
             await foreach (var _ in _engine.SearchAsync(_tempVaultDir, "word", isRegex: false, ct: cts.Token))
             {
+                cts.Cancel();
             }
         });
 
-        // Small delay to ensure process cleanup
-        await Task.Delay(100);
+        // Verify the specific spawned process was terminated and did not become an orphan
+        spawnedPid.ShouldBeGreaterThan(0);
 
-        // Verify no orphan rg processes remain
-        var rgProcesses = Process.GetProcessesByName("rg");
-        rgProcesses.ShouldBeEmpty();
+        bool isProcessAlive;
+        try
+        {
+            using var p = Process.GetProcessById(spawnedPid);
+            isProcessAlive = !p.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            // Process with this PID has completely exited
+            isProcessAlive = false;
+        }
+
+        isProcessAlive.ShouldBeFalse();
     }
 
     [Fact]

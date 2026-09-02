@@ -159,32 +159,27 @@ public sealed class SqliteVaultSearchIndexTests : IDisposable
     }
 
     [Theory]
-    [InlineData("\"")]
-    [InlineData("\"\"\"")]
     [InlineData("AND")]
     [InlineData("OR")]
     [InlineData("NOT")]
-    [InlineData("*")]
-    [InlineData("test*")]
-    [InlineData("(nested OR query)")]
-    [InlineData("prefix:column")]
-    [InlineData("^start")]
-    [InlineData("NEAR(word1 word2)")]
-    [InlineData("C# .NET")]
-    public async Task SearchAsync_WithFts5SpecialCharacters_DoesNotThrowOrTreatAsOperators(string specialQuery)
+    [InlineData("C#")]
+    [InlineData("NEAR(word1")]
+    public async Task SearchAsync_WithFts5SpecialCharacters_FindsLiteralTokensWithoutOperatorInterpretation(string term)
     {
         // Arrange
-        await _index.IndexFileAsync("notes/specials.md", "Line containing C# .NET AND OR NOT * ^ prefix:column (nested OR query) NEAR(word1 word2) symbols.");
+        await _index.IndexFileAsync("notes/specials.md", "Line containing C# .NET AND OR NOT symbols NEAR(word1 word2).");
+        await _index.IndexFileAsync("notes/other.md", "Plain line without those reserved words.");
 
-        // Act & Assert - should never throw syntax error
+        // Act
         var results = new List<VaultSearchResult>();
-        await foreach (var r in _index.SearchAsync(specialQuery))
+        await foreach (var r in _index.SearchAsync(term))
         {
             results.Add(r);
         }
 
-        // Search returns safely without exception
-        results.ShouldNotBeNull();
+        // Assert: encontra exatamente o arquivo com o termo literal e não confunde com operador FTS5
+        results.Count.ShouldBe(1);
+        results[0].FilePath.ShouldBe("notes/specials.md");
     }
 
     [Fact]

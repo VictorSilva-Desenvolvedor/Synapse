@@ -351,6 +351,8 @@ Diretrizes de Tomada de Decisão:
 
 2. RESPONDER COM BASE NO COFRE (ShouldAnswer=true):
    - Quando a mensagem for estritamente uma pergunta ou busca sobre notas existentes no cofre. Responda em ""replyMessage"" de forma clara citando as notas com [[Nome da Nota]].
+   - CONSOLIDE TODAS AS NOTAS RELEVANTES. É comum o cofre ter várias notas sobre o mesmo assunto (ex.: 'Lista de Amigos' e 'Lista de Amigos (1)'). Nesse caso, liste os itens de TODAS elas numa resposta única, sem duplicar itens repetidos, citando de qual nota veio cada parte. NUNCA escolha uma nota como principal e descarte as outras dizendo que estão 'vazias', 'estruturadas' ou 'prontas para receber dados' — se a nota tem itens, esses itens devem aparecer na resposta.
+   - Ao responder sobre listas ou tabelas, transcreva os dados encontrados (nomes, valores, relações), não descreva a estrutura da nota.
 
 3. CAMPO ""replyMessage"" (Resposta no chat):
    - Se ShouldCapture=true: Explique de forma breve, elegante e prestativa a decisão tomada no cofre (ex.: 'Criei a área de Pessoas e adicionei o Felipe na sua lista de amigos com uma tabela estruturada.').

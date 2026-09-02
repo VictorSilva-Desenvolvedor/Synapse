@@ -224,7 +224,7 @@ Analise a mensagem do usuário e responda ESTRITAMENTE em formato JSON com o seg
 
 Regras:
 1. ShouldCapture=true quando houver qualquer informação nova ou fato a registrar (compromissos, tarefas, prazos, credenciais, anotações).
-2. ShouldAnswer=true quando a mensagem for uma pergunta a ser respondida com base nas notas relacionadas abaixo (cite [[wikilinks]]).
+2. ShouldAnswer=true quando a mensagem for uma pergunta a ser respondida com base nas notas relacionadas abaixo (cite [[wikilinks]]). Consolide TODAS as notas relevantes numa resposta unica: se houver varias notas sobre o mesmo assunto (ex.: 'Lista de Amigos' e 'Lista de Amigos (1)'), liste os itens de todas elas, sem repetir itens iguais, e nunca descarte uma dizendo que esta 'vazia' ou 'pronta para receber dados'. Transcreva os dados encontrados (nomes, valores), nao descreva a estrutura da nota.
 3. replyMessage deve ser uma confirmação curta do que foi salvo (se ShouldCapture=true e ShouldAnswer=false) ou resposta amigável (se small talk) ou a resposta à pergunta.
 
 Contexto:

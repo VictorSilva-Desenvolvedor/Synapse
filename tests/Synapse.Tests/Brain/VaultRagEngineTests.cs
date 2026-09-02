@@ -430,7 +430,11 @@ public class VaultRagEngineTests : IDisposable
 
         var results = await ragEngine.SearchAsync("Hexagonal", _tempVaultDir, topK: 2);
 
-        results.Count.ShouldBe(2);
+        // Uma nota casou, uma nota volta. Antes esta asserção esperava 2, mas o segundo resultado
+        // era "NotaRaiz.md" - uma nota sem nenhuma relação com "Hexagonal", que só entrava porque o
+        // motor caía no caminho semântico e pontuava o cofre inteiro. Encher a resposta com nota
+        // irrelevante é justamente o ruído que degradava o contexto enviado à IA.
+        results.Count.ShouldBe(1);
         results[0].RelativePath.ShouldBe("Projetos/Arquitetura/PadraoHexagonal.md");
         results[0].Title.ShouldBe("PadraoHexagonal");
     }
@@ -850,7 +854,48 @@ public class VaultRagEngineTests : IDisposable
         results.Count.ShouldBe(1);
         results[0].Title.ShouldBe("Filosofia");
 
-        // PROVA MANDATÓRIA: quando o FTS5 não devolve o suficiente (< 3), a rede de segurança semântica é acionada!
+        // PROVA MANDATÓRIA: só quando o FTS5 não devolve NADA a rede de segurança semântica entra.
         _ = mockEmbedding.Received().GenerateEmbeddingAsync("teoria do conhecimento", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SearchAsync_WhenFtsFindsFewButExactNotes_DoesNotFallBackToEmbedding()
+    {
+        // Verificado no app real: "qual minha lista de amigos?" achava exatamente as 2 notas certas,
+        // mas o limiar de "suficiente" era >= 3, entao uma busca PRECISA era tratada como fracasso.
+        // O motor caia no caminho semantico, pagava o carregamento do modelo de embedding e ainda
+        // trazia de volta os registros de atividade do Synapse como notas consultadas.
+        var nota1 = Path.Combine(_tempVaultDir, "Lista de Amigos.md");
+        var nota2 = Path.Combine(_tempVaultDir, "Lista de Amigos (1).md");
+        await File.WriteAllTextAsync(nota1, "| Nome | Relacao |\n| Maria | Namorada |");
+        await File.WriteAllTextAsync(nota2, "| Nome | Relacao |\n| Felipe | Amigo |");
+
+        var mockEmbedding = Substitute.For<IEmbeddingProvider>();
+        mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new float[] { 1f, 0f }));
+
+        var mockAi = Substitute.For<IBrainAiProvider>();
+
+        var mockHybridSearch = Substitute.For<IHybridSearchService>();
+        mockHybridSearch.SearchAsync(Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(AsAsyncEnumerable(
+            [
+                new HybridSearchResult("Lista de Amigos.md", 0.9, SearchMatchSource.IndexOnly, null, []),
+                new HybridSearchResult("Lista de Amigos (1).md", 0.8, SearchMatchSource.IndexOnly, null, [])
+            ]));
+
+        var ragEngine = new VaultRagEngine(mockEmbedding, mockAi, hybridSearchService: mockHybridSearch);
+
+        var results = await ragEngine.SearchAsync("qual minha lista de amigos?", _tempVaultDir, topK: 4);
+
+        // As duas notas certas voltam...
+        results.Count.ShouldBe(2);
+
+        // ...e o embedding nunca foi chamado: dois resultados exatos ja sao resposta.
+        _ = mockEmbedding.DidNotReceive().GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+
+        // E o conteudo de AMBAS chega para a IA, nao so o da primeira.
+        results.ShouldContain(r => r.Excerpt.Contains("Maria"));
+        results.ShouldContain(r => r.Excerpt.Contains("Felipe"));
     }
 }

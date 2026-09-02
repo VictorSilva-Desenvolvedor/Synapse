@@ -61,8 +61,12 @@ public sealed class VaultRagEngine : IVaultBrainQuery
             }
         }
 
+        // VaultIndexFilter e a MESMA regra usada pelo indice de busca (bulk e watcher). Antes daqui o
+        // filtro era uma lista propria, que nao excluia os registros de atividade que o Synapse grava
+        // no cofre - entao mesmo com a busca por palavra ja limpa, o caminho semantico continuava
+        // trazendo os logs de volta como "notas consultadas".
         var files = Directory.GetFiles(vaultRootPath, "*.md", SearchOption.AllDirectories)
-            .Where(f => !f.Contains(".obsidian") && !f.Contains("_conflitos") && !f.Contains(".trash"))
+            .Where(f => !VaultIndexFilter.ShouldIgnore(HybridSearchEngine.ToCanonicalRelativePath(f, vaultRootPath)))
             .ToList();
 
         var currentRelativePaths = new HashSet<string>(
@@ -166,9 +170,14 @@ public sealed class VaultRagEngine : IVaultBrainQuery
             }
         }
 
-        // 2. Se o FTS5 devolver resultados suficientes (>= 3), retorna direto SEM chamar o IEmbeddingProvider!
-        // Caso comum gratuito: elimina 2,3s a 9,5s de carregamento de modelo / chamada ao Gemini.
-        const int SufficientLexicalThreshold = 3;
+        // 2. Qualquer resultado do FTS5 ja e resposta: retorna direto, SEM chamar o IEmbeddingProvider.
+        // O limiar anterior era >= 3, e isso tratava uma busca PRECISA como fracasso: "qual minha
+        // lista de amigos?" encontrava exatamente as 2 notas certas, caia no caminho semantico por
+        // ter menos de 3, pagava o carregamento do modelo de embedding (2,3s a 9,5s) e ainda trazia
+        // de volta os registros de atividade pelo indice do RAG. Encontrar pouco e o resultado
+        // desejado quando o cofre tem pouco sobre o assunto; so o vazio significa que a busca por
+        // palavra falhou e a rede de seguranca semantica precisa entrar.
+        const int SufficientLexicalThreshold = 1;
         if (lexicalMatches.Count >= SufficientLexicalThreshold)
         {
             var topMatches = lexicalMatches.Take(topK).ToList();

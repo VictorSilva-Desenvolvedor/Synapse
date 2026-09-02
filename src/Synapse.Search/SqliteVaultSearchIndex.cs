@@ -3,27 +3,79 @@ using Microsoft.Data.Sqlite;
 
 namespace Synapse.Search;
 
+/// <summary>
+/// Read-only mirror of the vault in a SQLite FTS5 table. It never writes to the .md
+/// files and can be deleted and rebuilt at any time.
+///
+/// Every operation opens its own connection instead of sharing one. SqliteConnection is
+/// not thread-safe, and the intended usage runs a background bulk index at the same time
+/// as searches from the UI - on a shared connection those two collide. Serializing them
+/// behind a lock would fix the collision but make the UI wait for a 500-file transaction
+/// to commit, which defeats the point. Separate connections plus WAL let readers run
+/// while a writer holds the write lock.
+/// </summary>
 public sealed class SqliteVaultSearchIndex : IVaultSearchIndex
 {
-    private readonly SqliteConnection _connection;
+    private readonly string _connectionString;
 
     public SqliteVaultSearchIndex(string connectionString)
     {
-        _connection = new SqliteConnection(connectionString);
-        _connection.Open();
-        EnsureSchema();
+        _connectionString = connectionString;
+
+        using var connection = OpenConnection();
+        EnsureSchema(connection);
     }
 
-    public static SqliteVaultSearchIndex ForFile(string databaseFilePath) =>
-        new(new SqliteConnectionStringBuilder
+    /// <summary>
+    /// Builds an index over a database file, creating the directory if it is missing.
+    ///
+    /// SqliteSyncIndexStore.ForFile leaves that to the caller, and it only works today
+    /// because something else creates %LOCALAPPDATA%\Synapse first. This index is meant
+    /// to live in its own subdirectory, where nothing guarantees that - and the failure
+    /// is a SqliteException at startup, not a missing file that gets created.
+    ///
+    /// Pooling=false because the pool keeps the file handle alive after the connection
+    /// closes, which blocks deleting or rebuilding the index.
+    /// </summary>
+    public static SqliteVaultSearchIndex ForFile(string databaseFilePath)
+    {
+        var directory = Path.GetDirectoryName(databaseFilePath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        return new(new SqliteConnectionStringBuilder
         {
             DataSource = databaseFilePath,
             Pooling = false
         }.ToString());
+    }
 
-    private void EnsureSchema()
+    /// <summary>
+    /// WAL is what allows a search to read while the bulk indexer is writing; in the
+    /// default rollback journal the writer blocks every reader for the whole transaction.
+    /// busy_timeout covers the remaining case of two writers meeting, where SQLite would
+    /// otherwise fail immediately with SQLITE_BUSY instead of waiting its turn.
+    /// </summary>
+    private SqliteConnection OpenConnection()
     {
-        using var command = _connection.CreateCommand();
+        var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText = """
+            PRAGMA journal_mode=WAL;
+            PRAGMA busy_timeout=5000;
+            """;
+        pragma.ExecuteNonQuery();
+
+        return connection;
+    }
+
+    private static void EnsureSchema(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
         command.CommandText = """
             CREATE VIRTUAL TABLE IF NOT EXISTS VaultIndex USING fts5(
                 file_path UNINDEXED,
@@ -48,16 +100,17 @@ public sealed class SqliteVaultSearchIndex : IVaultSearchIndex
             return;
         }
 
-        using var transaction = _connection.BeginTransaction();
+        using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
 
-        using var deleteCmd = _connection.CreateCommand();
+        using var deleteCmd = connection.CreateCommand();
         deleteCmd.Transaction = transaction;
         deleteCmd.CommandText = "DELETE FROM VaultIndex WHERE file_path = $filePath;";
         var delParam = deleteCmd.CreateParameter();
         delParam.ParameterName = "$filePath";
         deleteCmd.Parameters.Add(delParam);
 
-        using var insertCmd = _connection.CreateCommand();
+        using var insertCmd = connection.CreateCommand();
         insertCmd.Transaction = transaction;
         insertCmd.CommandText = "INSERT INTO VaultIndex (file_path, content) VALUES ($filePath, $content);";
         var insPath = insertCmd.CreateParameter();
@@ -86,7 +139,8 @@ public sealed class SqliteVaultSearchIndex : IVaultSearchIndex
     {
         ct.ThrowIfCancellationRequested();
 
-        using var cmd = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var cmd = connection.CreateCommand();
         cmd.CommandText = "DELETE FROM VaultIndex WHERE file_path = $filePath;";
         cmd.Parameters.AddWithValue("$filePath", filePath);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -119,7 +173,10 @@ public sealed class SqliteVaultSearchIndex : IVaultSearchIndex
                 .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
                 .Select(term => $"\"{term.Replace("\"", "\"\"")}\""));
 
-        using var cmd = _connection.CreateCommand();
+        // The connection lives as long as the enumeration: disposing it here closes it
+        // when the caller stops reading, including an early break.
+        using var connection = OpenConnection();
+        using var cmd = connection.CreateCommand();
         cmd.CommandText = """
             SELECT file_path,
                    snippet(VaultIndex, 1, '<b>', '</b>', '...', 32) AS snippet_text,
@@ -149,14 +206,18 @@ public sealed class SqliteVaultSearchIndex : IVaultSearchIndex
     {
         ct.ThrowIfCancellationRequested();
 
-        using var cmd = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT count(*) FROM VaultIndex;";
         var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return Convert.ToInt32(result);
     }
 
+    /// <summary>
+    /// Nothing to release: no connection outlives the operation that opened it. Kept
+    /// because IVaultSearchIndex is IDisposable and an implementation may need it.
+    /// </summary>
     public void Dispose()
     {
-        _connection.Dispose();
     }
 }

@@ -5,23 +5,49 @@ namespace Synapse.Data;
 
 /// <summary>
 /// Implementação SQLite de ISyncIndexStore (RF-SYNC.3/4, ADR-002), sobre o esquema de 4 tabelas de
-/// SRS - Synapse.md seção 3.3 (SyncedFiles, SyncQueue, Conflicts, SyncState). Mantém uma única conexão
-/// aberta durante toda a vida do objeto - coerente com o modelo de concorrência do SAD (seção 4): um
-/// único SyncQueueProcessor é quem escreve, SQLite é single-writer por natureza.
+/// SRS - Synapse.md seção 3.3 (SyncedFiles, SyncQueue, Conflicts, SyncState).
+///
+/// Cada operação abre a própria conexão. A versão anterior mantinha uma única conexão aberta durante
+/// toda a vida do objeto, justificada por "um único SyncQueueProcessor é quem escreve" - e essa premissa
+/// é falsa no Host: o Worker sobe quatro Task.Run em paralelo, e três delas tocam este mesmo singleton
+/// (a fila de eventos, o poller remoto e a reconciliação). SqliteConnection guarda a lista de comandos
+/// vivos numa List sem sincronização, então o Dispose concorrente de dois comandos em threads diferentes
+/// derruba o processo com ArgumentOutOfRangeException dentro de RemoveCommand - reproduzido em teste,
+/// 3 de 3 execuções.
+///
+/// Nenhum método depende de estado de conexão (não há transação, nem last_insert_rowid), então separar
+/// as conexões é seguro. journal_mode=WAL mantém leitura e escrita simultâneas, e busy_timeout faz o
+/// segundo escritor esperar a vez em vez de falhar na hora com SQLITE_BUSY.
 /// </summary>
 public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 {
-    private readonly SqliteConnection _connection;
+    private readonly string _connectionString;
 
     public SqliteSyncIndexStore(string connectionString)
     {
-        _connection = new SqliteConnection(connectionString);
-        _connection.Open();
+        _connectionString = connectionString;
         EnsureSchema();
     }
 
-    // Pooling=false: esta conexao vive pelo tempo de vida do objeto (nao e um cenario de muitas conexoes
-    // curtas), e sem isso o arquivo fica com handle preso pelo pool mesmo depois do Dispose().
+    private SqliteConnection OpenConnection()
+    {
+        var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText = """
+            PRAGMA journal_mode=WAL;
+            PRAGMA busy_timeout=5000;
+            """;
+        pragma.ExecuteNonQuery();
+
+        return connection;
+    }
+
+    // Pooling=false: agora SAO muitas conexoes curtas, uma por operacao, e a tentacao e ligar o pool.
+    // Continua desligado porque o pool segura o handle do arquivo depois do Close() - com ele, apagar ou
+    // reconstruir o banco falha, e os testes nao conseguem limpar o arquivo temporario. O custo de abrir
+    // uma conexao SQLite local e pequeno perto de uma corrupcao de estado compartilhado.
     //
     // O diretorio e criado aqui porque o SQLite nao cria pasta: ele cria o ARQUIVO do banco, e falha com
     // SqliteException("unable to open database file") se a pasta nao existir. O caminho padrao e
@@ -41,7 +67,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     private void EnsureSchema()
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS SyncedFiles (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,7 +114,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     private void MigrateSchema()
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA table_info(SyncedFiles);";
         using var reader = command.ExecuteReader();
         var hasCloudContentHash = false;
@@ -104,7 +132,7 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
         if (!hasCloudContentHash)
         {
-            using var alterCmd = _connection.CreateCommand();
+            using var alterCmd = connection.CreateCommand();
             alterCmd.CommandText = "ALTER TABLE SyncedFiles ADD COLUMN CloudContentHash TEXT NULL;";
             alterCmd.ExecuteNonQuery();
         }
@@ -112,7 +140,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     public async Task<SyncedFileRecord?> FindByLocalPathAsync(string localPath, CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = "SELECT Id, LocalPath, CloudFileId, ContentHash, LocalMtime, CloudModifiedTime, LastSyncedAt, Status, CloudContentHash FROM SyncedFiles WHERE LocalPath = $localPath";
         command.Parameters.AddWithValue("$localPath", localPath);
 
@@ -122,7 +151,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     public async Task<SyncedFileRecord?> FindByCloudFileIdAsync(string cloudFileId, CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = "SELECT Id, LocalPath, CloudFileId, ContentHash, LocalMtime, CloudModifiedTime, LastSyncedAt, Status, CloudContentHash FROM SyncedFiles WHERE CloudFileId = $cloudFileId";
         command.Parameters.AddWithValue("$cloudFileId", cloudFileId);
 
@@ -134,7 +164,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
     // nunca pelo valor que o chamador passa em SyncedFileRecord.Id (irrelevante em uma insercao nova).
     public async Task UpsertAsync(SyncedFileRecord record, CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO SyncedFiles (LocalPath, CloudFileId, ContentHash, LocalMtime, CloudModifiedTime, LastSyncedAt, Status, CloudContentHash)
             VALUES ($localPath, $cloudFileId, $contentHash, $localMtime, $cloudModifiedTime, $lastSyncedAt, $status, $cloudContentHash)
@@ -161,7 +192,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     public async Task RemoveAsync(string localPath, CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM SyncedFiles WHERE LocalPath = $localPath";
         command.Parameters.AddWithValue("$localPath", localPath);
         await command.ExecuteNonQueryAsync(ct);
@@ -169,7 +201,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     public async Task EnqueueAsync(SyncQueueItem item, CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO SyncQueue (FilePath, EventType, EnqueuedAt, Attempts, LastError)
             VALUES ($filePath, $eventType, $enqueuedAt, $attempts, $lastError)
@@ -187,7 +220,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
     // fazem isso. Sustenta RF-SYNC.4: uma queda entre o Peek e o MarkDone deixa o item pendente de novo.
     public async Task<SyncQueueItem?> PeekNextAsync(CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = "SELECT Id, FilePath, EventType, EnqueuedAt, Attempts, LastError FROM SyncQueue ORDER BY Id ASC LIMIT 1";
 
         using var reader = await command.ExecuteReaderAsync(ct);
@@ -196,7 +230,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     public async Task MarkDoneAsync(long queueItemId, CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM SyncQueue WHERE Id = $id";
         command.Parameters.AddWithValue("$id", queueItemId);
         await command.ExecuteNonQueryAsync(ct);
@@ -204,7 +239,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     public async Task MarkFailedAsync(long queueItemId, string error, CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = "UPDATE SyncQueue SET Attempts = Attempts + 1, LastError = $error WHERE Id = $id";
         command.Parameters.AddWithValue("$id", queueItemId);
         command.Parameters.AddWithValue("$error", error);
@@ -213,7 +249,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     public async Task<string?> GetChangesPageTokenAsync(CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = "SELECT DriveChangesPageToken FROM SyncState WHERE Id = 1";
 
         var result = await command.ExecuteScalarAsync(ct);
@@ -222,7 +259,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     public async Task SaveChangesPageTokenAsync(string pageToken, CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO SyncState (Id, DriveChangesPageToken)
             VALUES (1, $pageToken)
@@ -234,7 +272,8 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     public async Task RecordConflictAsync(ConflictRecord record, CancellationToken ct)
     {
-        using var command = _connection.CreateCommand();
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO Conflicts (FilePath, LocalVersionPath, RemoteVersionPath, DetectedAt)
             VALUES ($filePath, $localVersionPath, $remoteVersionPath, $detectedAt)
@@ -266,5 +305,9 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
         Attempts: reader.GetInt32(4),
         LastError: reader.IsDBNull(5) ? null : reader.GetString(5));
 
-    public void Dispose() => _connection.Dispose();
+    // Nada a liberar: nenhuma conexao sobrevive a operacao que a abriu. Mantido porque ISyncIndexStore
+    // e registrado como singleton no DI e o container chama Dispose no encerramento.
+    public void Dispose()
+    {
+    }
 }

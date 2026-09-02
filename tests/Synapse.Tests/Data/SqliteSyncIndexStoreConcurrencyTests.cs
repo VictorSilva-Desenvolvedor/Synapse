@@ -34,7 +34,12 @@ public class SqliteSyncIndexStoreConcurrencyTests : IDisposable
     [Fact]
     public async Task TresLacosSimultaneos_ComoNoWorker()
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        // 120s, nao 30s: este limite e rede contra DEADLOCK, nao asserção de desempenho. Com 30s o
+        // teste falhava de forma consistente no runner do CI (mais lento que a maquina local), o
+        // proprio token cancelava as operacoes no meio e o TaskCanceledException resultante era
+        // reportado como "conexao compartilhada quebrou" - acusando o produto por lentidao da
+        // maquina. Um travamento real continua sendo pego, so que sem falso positivo.
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         var ct = cts.Token;
 
         var escritor = Task.Run(async () =>
@@ -63,6 +68,16 @@ public class SqliteSyncIndexStoreConcurrencyTests : IDisposable
         }, ct);
 
         var erro = await Record.ExceptionAsync(() => Task.WhenAll(escritor, fila, leitor));
+
+        // Distingue as duas causas: se foi o NOSSO token que estourou, o problema e travamento
+        // (ou maquina lenta demais), nao a conexao compartilhada. Reportar as duas com a mesma
+        // mensagem foi o que mascarou a causa real da falha no CI durante horas.
+        if (erro is not null && cts.IsCancellationRequested)
+        {
+            throw new Xunit.Sdk.XunitException(
+                "As tres tarefas nao terminaram em 120s - possivel deadlock na conexao compartilhada " +
+                $"(ou maquina excepcionalmente lenta). Excecao: {erro.GetType().Name}: {erro.Message}");
+        }
 
         erro.ShouldBeNull($"conexao compartilhada quebrou: {erro?.GetType().Name}: {erro?.Message}");
     }

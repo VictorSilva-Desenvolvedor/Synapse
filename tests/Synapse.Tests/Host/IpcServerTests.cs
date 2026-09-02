@@ -112,7 +112,11 @@ public class IpcServerTests
         response.Tipo.ShouldBe("Error");
     }
 
-    [Fact(Timeout = 30000)]
+    // 90s, nao 30s: o limite existe para pegar servidor que nao aceita a segunda conexao (o defeito
+    // que este teste cobre), nao para medir velocidade. No runner do CI, com a suite inteira rodando
+    // em paralelo numa maquina de dois nucleos, ate testes triviais levam 30s de relogio - este batia
+    // no teto e derrubava o pipeline sem nenhum defeito real no produto.
+    [Fact(Timeout = 90000)]
     public async Task StartAsync_WhenFirstClientHoldsConnection_SecondClientShouldConnectAndReceiveResponse()
     {
         var pipeName = $"synapse-ipc-test-{Guid.NewGuid():N}";

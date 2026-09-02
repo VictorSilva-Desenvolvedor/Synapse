@@ -113,4 +113,43 @@ public class FileWatcherServiceTests : IDisposable
         evento.ShouldNotBeNull();
         evento.EventType.ShouldBe(SyncEventType.Deleted);
     }
+
+    [Fact]
+    public void Raise_WhenSubscriberThrows_DoesNotLetExceptionEscapeTheWatcherCallback()
+    {
+        // Raise roda no callback do FileSystemWatcher: qualquer excecao que escape dali derruba o
+        // PROCESSO, nao so o evento. Foi assim que uma ArgumentNullException vinda de
+        // Path.GetRelativePath(null, ...) matou o host de teste inteiro.
+        using var watcher = new FileWatcherService();
+        watcher.Start(_vaultRoot);
+        watcher.Changed += (_, _) => throw new InvalidOperationException("assinante quebrado");
+
+        Should.NotThrow(() => watcher.Raise(Path.Combine(_vaultRoot, "nota.md"), SyncEventType.Created));
+    }
+
+    [Fact]
+    public async Task Raise_WhileStopRunsConcurrently_NeverThrows()
+    {
+        // Corrida real: Stop() zera o caminho raiz enquanto eventos de arquivo ainda chegam. A versao
+        // anterior verificava o campo e depois o lia de novo, entao o Stop() cabia no meio e
+        // Path.GetRelativePath recebia null.
+        for (int rodada = 0; rodada < 50; rodada++)
+        {
+            var watcher = new FileWatcherService();
+            watcher.Start(_vaultRoot);
+
+            var disparos = Task.Run(() =>
+            {
+                for (int i = 0; i < 200; i++)
+                {
+                    watcher.Raise(Path.Combine(_vaultRoot, $"nota_{i}.md"), SyncEventType.Modified);
+                }
+            });
+
+            var parada = Task.Run(() => watcher.Stop());
+
+            await Should.NotThrowAsync(async () => await Task.WhenAll(disparos, parada));
+            watcher.Dispose();
+        }
+    }
 }

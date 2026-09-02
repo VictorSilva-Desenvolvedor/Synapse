@@ -60,13 +60,28 @@ public sealed class FileWatcherService : IVaultWatcher
         _rootPath = null;
     }
 
-    private void Raise(string fullPath, SyncEventType eventType)
+    internal void Raise(string fullPath, SyncEventType eventType)
     {
-        if (_rootPath is null) return;
+        // Snapshot do campo, nao leitura repetida: Stop() zera _rootPath em outra thread, e a versao
+        // anterior verificava o campo e depois o usava de novo. Entre as duas leituras o Stop()
+        // entrava e Path.GetRelativePath recebia null, lancando ArgumentNullException dentro do
+        // callback do FileSystemWatcher - onde excecao nao tratada derruba o PROCESSO inteiro
+        // (reproduzido: matou o host de teste com "Value cannot be null. (Parameter 'relativeTo')").
+        var rootPath = _rootPath;
+        if (rootPath is null) return;
         if (!IsWatchedExtension(fullPath)) return;
 
-        var relativePath = Path.GetRelativePath(_rootPath, fullPath).Replace('\\', '/');
-        Changed?.Invoke(this, new VaultChangeEvent(relativePath, eventType));
+        try
+        {
+            var relativePath = Path.GetRelativePath(rootPath, fullPath).Replace('\\', '/');
+            Changed?.Invoke(this, new VaultChangeEvent(relativePath, eventType));
+        }
+        catch
+        {
+            // Rede de seguranca: nada pode escapar daqui. Este metodo roda no callback do
+            // FileSystemWatcher, entao qualquer excecao que vaze - inclusive vinda de um assinante
+            // do evento Changed - encerra o processo, em vez de falhar so aquele evento.
+        }
     }
 
     private bool IsWatchedExtension(string path) =>

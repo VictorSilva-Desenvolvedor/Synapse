@@ -55,7 +55,14 @@ public sealed class VaultBulkIndexer : IVaultBulkIndexer
                 continue;
             }
 
-            batch.Add((filePath, content));
+            // Chave canonica relativa ao cofre, a MESMA forma usada pelo VaultIndexWatcher.
+            // Se o bulk gravasse o caminho absoluto, um arquivo indexado aqui e depois editado
+            // ganharia uma segunda linha no indice (sob a chave relativa do watcher) e a linha
+            // antiga sobreviveria para sempre - um termo apagado pelo usuario continuaria sendo
+            // encontrado na busca. Provado por
+            // HybridSearchServiceTests.EditingFileIndexedByBulk_DoesNotLeaveStaleContentSearchable.
+            var canonicalPath = HybridSearchEngine.ToCanonicalRelativePath(filePath, vaultRootPath);
+            batch.Add((canonicalPath, content));
 
             if (batch.Count >= _batchSize)
             {

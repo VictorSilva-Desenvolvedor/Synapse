@@ -44,6 +44,22 @@ public sealed class VaultBulkIndexer : IVaultBulkIndexer
         {
             ct.ThrowIfCancellationRequested();
 
+            // Chave canonica relativa ao cofre, a MESMA forma usada pelo VaultIndexWatcher.
+            // Se o bulk gravasse o caminho absoluto, um arquivo indexado aqui e depois editado
+            // ganharia uma segunda linha no indice (sob a chave relativa do watcher) e a linha
+            // antiga sobreviveria para sempre - um termo apagado pelo usuario continuaria sendo
+            // encontrado na busca. Provado por
+            // HybridSearchServiceTests.EditingFileIndexedByBulk_DoesNotLeaveStaleContentSearchable.
+            var canonicalPath = HybridSearchEngine.ToCanonicalRelativePath(filePath, vaultRootPath);
+
+            // Mesma regra de exclusao do VaultIndexWatcher (VaultIndexFilter), aplicada antes de
+            // ler o arquivo: sem isso o bulk indexava os logs de atividade do proprio Synapse, que
+            // contem o texto de toda pergunta ja feita e por isso casam com qualquer consulta.
+            if (VaultIndexFilter.ShouldIgnore(canonicalPath))
+            {
+                continue;
+            }
+
             string content;
             try
             {
@@ -55,13 +71,6 @@ public sealed class VaultBulkIndexer : IVaultBulkIndexer
                 continue;
             }
 
-            // Chave canonica relativa ao cofre, a MESMA forma usada pelo VaultIndexWatcher.
-            // Se o bulk gravasse o caminho absoluto, um arquivo indexado aqui e depois editado
-            // ganharia uma segunda linha no indice (sob a chave relativa do watcher) e a linha
-            // antiga sobreviveria para sempre - um termo apagado pelo usuario continuaria sendo
-            // encontrado na busca. Provado por
-            // HybridSearchServiceTests.EditingFileIndexedByBulk_DoesNotLeaveStaleContentSearchable.
-            var canonicalPath = HybridSearchEngine.ToCanonicalRelativePath(filePath, vaultRootPath);
             batch.Add((canonicalPath, content));
 
             if (batch.Count >= _batchSize)

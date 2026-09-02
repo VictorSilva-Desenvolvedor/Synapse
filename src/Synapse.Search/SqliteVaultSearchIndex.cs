@@ -146,6 +146,50 @@ public sealed class SqliteVaultSearchIndex : IVaultSearchIndex
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Palavras vazias do portugues, removidas de perguntas em linguagem natural antes de montar a
+    /// consulta FTS5. Sem isso, "me diga minha lista de amigos" exigia que a nota contivesse tambem
+    /// "me", "diga" e "minha" - e a nota certa do usuario ("Brain/Pessoas/Lista de Amigos.md") era
+    /// excluida, enquanto os registros de atividade (que citam a pergunta inteira) casavam. Medido
+    /// no cofre real: a mesma pergunta sem as palavras vazias traz a nota certa no topo.
+    /// </summary>
+    private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "a", "as", "ao", "aos", "o", "os", "um", "uma", "uns", "umas",
+        "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas",
+        "por", "para", "pra", "com", "sem", "sobre", "entre",
+        "e", "ou", "que", "se", "qual", "quais", "quando", "onde", "como", "quem",
+        "meu", "minha", "meus", "minhas", "seu", "sua", "seus", "suas",
+        "me", "mim", "eu", "voce", "ele", "ela", "isso", "este", "esta", "esse", "essa",
+        "diga", "diz", "fale", "mostre", "liste", "quero", "gostaria", "preciso",
+        "ser", "e", "sao", "esta", "estao", "foi", "tem", "ter", "há", "ha",
+        "the", "of", "in", "to", "is", "are", "my", "me", "show", "list", "tell"
+    };
+
+    /// <summary>
+    /// Monta a consulta FTS5 a partir do texto do usuario.
+    /// Cada termo vai entre aspas para que nada (AND, OR, NOT, *, :, parenteses) seja interpretado
+    /// como operador. Poucos termos ficam em E implicito, que e mais preciso; muitos termos passam a
+    /// OU explicito, porque exigir todas as palavras de uma frase longa elimina justamente o
+    /// documento certo - o bm25 se encarrega de ranquear na frente quem contem mais termos.
+    /// </summary>
+    internal static string BuildFtsQuery(string query)
+    {
+        var rawTerms = query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+
+        // Se sobrar termo de conteudo, usa so eles; se a consulta for feita apenas de palavras
+        // vazias (ex.: "o que e isso"), mantem os originais para nao buscar por nada.
+        var contentTerms = rawTerms.Where(t => !StopWords.Contains(t.Trim())).ToArray();
+        var terms = contentTerms.Length > 0 ? contentTerms : rawTerms;
+
+        var quoted = terms.Select(term => $"\"{term.Replace("\"", "\"\"")}\"").ToArray();
+
+        // Ate 3 termos: E implicito (espaco entre frases no FTS5). Acima disso, OU.
+        return quoted.Length <= 3
+            ? string.Join(' ', quoted)
+            : string.Join(" OR ", quoted);
+    }
+
     public async IAsyncEnumerable<VaultSearchResult> SearchAsync(
         string query,
         int limit = 100,
@@ -161,17 +205,7 @@ public sealed class SqliteVaultSearchIndex : IVaultSearchIndex
             limit = 100;
         }
 
-        // Each term is quoted separately, not the whole query as one string. Quoting the
-        // whole query also made it a single FTS5 phrase, so "sync conflict" only matched
-        // documents where those words were adjacent - a note containing both words apart
-        // returned nothing. Quoting per term keeps every character literal (AND, OR, NOT,
-        // *, :, ( ) are never parsed as operators) while restoring the implicit AND that
-        // FTS5 applies between phrases.
-        var ftsLiteralQuery = string.Join(
-            ' ',
-            query
-                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
-                .Select(term => $"\"{term.Replace("\"", "\"\"")}\""));
+        var ftsLiteralQuery = BuildFtsQuery(query);
 
         // The connection lives as long as the enumeration: disposing it here closes it
         // when the caller stops reading, including an early break.

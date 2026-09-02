@@ -175,4 +175,44 @@ public sealed class VaultBulkIndexerTests : IDisposable
             await _indexer.IndexVaultAsync("   ", _index);
         });
     }
+
+    [Fact]
+    public async Task IndexVaultAsync_SkipsSynapseOwnLogsAndInternalFolders()
+    {
+        // Os logs de atividade que o proprio Synapse grava no cofre registram o texto literal de
+        // toda pergunta ja feita ao chat, entao casavam com qualquer consulta e afogavam as notas
+        // reais. Verificado no cofre do usuario: "me diga minha lista de amigos" devolvia apenas
+        // registros de atividade. Sao telemetria, nao conhecimento - ficam fora do indice.
+        var logDir = Path.Combine(_tempVaultDir, "Synapse", "Logs");
+        Directory.CreateDirectory(logDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(logDir, "Registro de Atividades — 2026-09-02.md"),
+            "Pergunta: me diga minha lista de amigos | termoDeveSerIgnorado");
+
+        var obsidianDir = Path.Combine(_tempVaultDir, ".obsidian");
+        Directory.CreateDirectory(obsidianDir);
+        await File.WriteAllTextAsync(Path.Combine(obsidianDir, "config.md"), "termoDeveSerIgnorado");
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_tempVaultDir, "NotaReal.md"),
+            "Conteudo legitimo com termoDeveSerEncontrado.");
+
+        var total = await _indexer.IndexVaultAsync(_tempVaultDir, _index);
+
+        total.ShouldBe(1);
+
+        var encontrados = new List<VaultSearchResult>();
+        await foreach (var r in _index.SearchAsync("termoDeveSerIgnorado"))
+        {
+            encontrados.Add(r);
+        }
+        encontrados.ShouldBeEmpty();
+
+        var reais = new List<VaultSearchResult>();
+        await foreach (var r in _index.SearchAsync("termoDeveSerEncontrado"))
+        {
+            reais.Add(r);
+        }
+        reais.Count.ShouldBe(1);
+    }
 }

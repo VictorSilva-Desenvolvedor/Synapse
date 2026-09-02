@@ -201,4 +201,49 @@ public sealed class SqliteVaultSearchIndexTests : IDisposable
         // Assert
         (await _index.GetIndexedFileCountAsync()).ShouldBe(3);
     }
+
+    [Fact]
+    public async Task SearchAsync_NaturalLanguageQuestion_FindsNoteThatLacksTheFillerWords()
+    {
+        // A nota real do usuario nao contem "me", "diga" nem "minha". Enquanto a consulta exigia
+        // TODOS os termos, ela era excluida e sobravam so os registros de atividade do Synapse,
+        // que citam a pergunta inteira. Verificado no cofre real antes da correcao.
+        await _index.IndexFileAsync(
+            "Brain/Pessoas/Lista de Amigos.md",
+            "# Lista de Amigos\n\n| Nome | Contato |\n| Felipe | 9999 |");
+        await _index.IndexFileAsync("Outra.md", "Nota sem relacao nenhuma com o assunto.");
+
+        var encontrados = new List<VaultSearchResult>();
+        await foreach (var r in _index.SearchAsync("me diga minha lista de amigos"))
+        {
+            encontrados.Add(r);
+        }
+
+        encontrados.ShouldContain(r => r.FilePath == "Brain/Pessoas/Lista de Amigos.md");
+    }
+
+    [Fact]
+    public void BuildFtsQuery_RemovesStopWordsAndUsesOrForLongQueries()
+    {
+        // Poucos termos de conteudo: E implicito, que e mais preciso.
+        SqliteVaultSearchIndex.BuildFtsQuery("me diga minha lista de amigos")
+            .ShouldBe("\"lista\" \"amigos\"");
+
+        // Muitos termos de conteudo: OU, para nao exigir todas as palavras da frase.
+        SqliteVaultSearchIndex.BuildFtsQuery("relatorio anual vendas regiao sul detalhado")
+            .ShouldContain(" OR ");
+
+        // Consulta feita so de palavras vazias mantem os termos originais, para nao buscar por nada.
+        SqliteVaultSearchIndex.BuildFtsQuery("o que e isso")
+            .ShouldContain("\"isso\"");
+    }
+
+    [Fact]
+    public void BuildFtsQuery_KeepsFts5OperatorsLiteral()
+    {
+        // Operadores do FTS5 digitados pelo usuario continuam sendo texto, nunca operador.
+        var q = SqliteVaultSearchIndex.BuildFtsQuery("relatorio AND vendas NEAR meta");
+        q.ShouldContain("\"AND\"");
+        q.ShouldContain("\"NEAR\"");
+    }
 }

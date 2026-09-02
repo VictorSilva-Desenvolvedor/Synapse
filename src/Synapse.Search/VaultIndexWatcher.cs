@@ -9,8 +9,6 @@ namespace Synapse.Search;
 /// </summary>
 public sealed class VaultIndexWatcher : IVaultIndexWatcher
 {
-    private static readonly string[] IgnoredDirectories = [".obsidian", "_conflitos", ".trash"];
-
     private readonly IVaultSearchIndex _searchIndex;
     private readonly TimeSpan _debounceDelay;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounces;
@@ -321,11 +319,7 @@ public sealed class VaultIndexWatcher : IVaultIndexWatcher
     private static bool IsWatchedMarkdownFile(string path) =>
         path.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsIgnoredPath(string relativePath)
-    {
-        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return segments.Any(s => s.StartsWith('.') || IgnoredDirectories.Contains(s, StringComparer.OrdinalIgnoreCase));
-    }
+    private static bool IsIgnoredPath(string relativePath) => VaultIndexFilter.ShouldIgnore(relativePath);
 
     public void Dispose()
     {

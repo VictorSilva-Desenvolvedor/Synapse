@@ -22,8 +22,22 @@ public sealed class SqliteSyncIndexStore : ISyncIndexStore, IDisposable
 
     // Pooling=false: esta conexao vive pelo tempo de vida do objeto (nao e um cenario de muitas conexoes
     // curtas), e sem isso o arquivo fica com handle preso pelo pool mesmo depois do Dispose().
-    public static SqliteSyncIndexStore ForFile(string databaseFilePath) =>
-        new(new SqliteConnectionStringBuilder { DataSource = databaseFilePath, Pooling = false }.ToString());
+    //
+    // O diretorio e criado aqui porque o SQLite nao cria pasta: ele cria o ARQUIVO do banco, e falha com
+    // SqliteException("unable to open database file") se a pasta nao existir. O caminho padrao e
+    // %LOCALAPPDATA%\Synapse\synapse.db, e ate agora isso so funcionava porque outra coisa (o log, a
+    // configuracao) criava essa pasta antes por acaso - ninguem garantia a ordem. Bastava o Host subir
+    // primeiro numa maquina limpa para quebrar no arranque.
+    public static SqliteSyncIndexStore ForFile(string databaseFilePath)
+    {
+        var directory = Path.GetDirectoryName(databaseFilePath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        return new(new SqliteConnectionStringBuilder { DataSource = databaseFilePath, Pooling = false }.ToString());
+    }
 
     private void EnsureSchema()
     {

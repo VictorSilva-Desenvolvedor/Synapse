@@ -1,0 +1,25 @@
+<Project>
+
+  <!--
+    Aplica-se a todos os projetos da solution (MSBuild carrega este arquivo
+    automaticamente a partir da raiz).
+
+    PathMap troca o caminho absoluto da maquina de build pelo prefixo "/_/" nos
+    caminhos de codigo-fonte que o compilador grava dentro do binario e do PDB.
+    Sem isso, os artefatos publicados carregavam o caminho completo da maquina
+    de quem compilou - incluindo o nome de usuario do Windows e a arvore de
+    pastas ate o repositorio - e qualquer pessoa que baixasse uma release
+    conseguia ler tudo com um grep no .exe. "/_/" e a mesma convencao que o
+    proprio .NET usa em builds deterministicos.
+
+    ContinuousIntegrationBuild completa o par no CI: normaliza o restante dos
+    caminhos e torna a saida reproduzivel. Fica ligado so quando a variavel
+    CI existe, porque em build local ele atrapalha o debug passo a passo (o
+    depurador deixa de achar o fonte pelo caminho reescrito).
+  -->
+  <PropertyGroup>
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+</Project>

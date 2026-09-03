@@ -401,14 +401,14 @@ public class GeminiAiProviderTests
     {
         var captureHandler = new CapturingHttpMessageHandler(@"{
   ""candidates"": [
-    { ""content"": { ""parts"": [ { ""text"": ""{\""shouldCapture\"": false, \""title\"": null, \""category\"": null, \""tags\"": [], \""bodyMarkdown\"": null, \""keyPoints\"": [], \""suggestedConnections\"": [], \""shouldAnswer\"": true, \""replyMessage\"": \""Seus amigos são Felipe...\""}"" } ] } }
+    { ""content"": { ""parts"": [ { ""text"": ""{\""shouldCapture\"": false, \""title\"": null, \""category\"": null, \""tags\"": [], \""bodyMarkdown\"": null, \""keyPoints\"": [], \""suggestedConnections\"": [], \""shouldAnswer\"": true, \""replyMessage\"": \""Seus amigos são Fulano...\""}"" } ] } }
   ]
 }");
         var client = new HttpClient(captureHandler);
         var config = new BrainConfig { GeminiApiKey = "AIzaSyTestKey123", GeminiModel = "gemini-3.6-flash" };
         var provider = new GeminiAiProvider(config, client);
 
-        var tableExcerpt = "| Nome | Relacao | Detalhes |\n| Felipe | Amigo | Engenheiro de Software |";
+        var tableExcerpt = "| Nome | Relacao | Detalhes |\n| Fulano | Amigo | Engenheiro de Software |";
         var relatedNotes = new List<SemanticSearchResult>
         {
             new("Brain/Pessoas/Lista de Amigos.md", "Lista de Amigos", tableExcerpt, 0.95f)
@@ -423,6 +423,6 @@ public class GeminiAiProviderTests
         captureHandler.LastRequestBody.ShouldNotBeNull();
         // Prova que a IA recebe o trecho contextualizado com a tabela de amigos e os detalhes na íntegra
         captureHandler.LastRequestBody.ShouldContain("- [[Lista de Amigos]]: | Nome | Relacao | Detalhes |");
-        captureHandler.LastRequestBody.ShouldContain("| Felipe | Amigo | Engenheiro de Software |");
+        captureHandler.LastRequestBody.ShouldContain("| Fulano | Amigo | Engenheiro de Software |");
     }
 }

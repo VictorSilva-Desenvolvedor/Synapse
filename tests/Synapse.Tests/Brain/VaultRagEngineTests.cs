@@ -671,7 +671,7 @@ public class VaultRagEngineTests : IDisposable
     [Fact]
     public async Task ReadExcerpt_WhenTermIsOnLine40InLargeNote_IncludesTermInExcerpt()
     {
-        // Arrange: nota grande (> 4000 caracteres) onde o termo específico ("Felipe") está na linha 40 numa tabela
+        // Arrange: nota grande (> 4000 caracteres) onde o termo específico ("Fulano") está na linha 40 numa tabela
         var notePath = Path.Combine(_tempVaultDir, "ListaDeAmigos.md");
         var sb = new System.Text.StringBuilder();
         for (int i = 1; i <= 60; i++)
@@ -679,7 +679,7 @@ public class VaultRagEngineTests : IDisposable
             if (i == 40)
             {
                 sb.AppendLine("| Nome | Relacao | Detalhes | Data |");
-                sb.AppendLine("| Felipe | Colega | Engenheiro de Software na Synapse | 2026-09-02 |");
+                sb.AppendLine("| Fulano | Colega | Engenheiro de Software na Synapse | 2026-09-02 |");
             }
             else
             {
@@ -700,11 +700,11 @@ public class VaultRagEngineTests : IDisposable
         await ragEngine.IndexVaultAsync(_tempVaultDir);
 
         // Act
-        var results = await ragEngine.SearchAsync("Felipe", _tempVaultDir, topK: 1);
+        var results = await ragEngine.SearchAsync("Fulano", _tempVaultDir, topK: 1);
 
-        // Assert: a tabela com Felipe na linha 40 DEVE estar no Excerpt enviado para a IA
+        // Assert: a tabela com Fulano na linha 40 DEVE estar no Excerpt enviado para a IA
         results.Count.ShouldBe(1);
-        results[0].Excerpt.ShouldContain("Felipe");
+        results[0].Excerpt.ShouldContain("Fulano");
         results[0].Excerpt.ShouldContain("Engenheiro de Software");
     }
 
@@ -867,8 +867,8 @@ public class VaultRagEngineTests : IDisposable
         // trazia de volta os registros de atividade do Synapse como notas consultadas.
         var nota1 = Path.Combine(_tempVaultDir, "Lista de Amigos.md");
         var nota2 = Path.Combine(_tempVaultDir, "Lista de Amigos (1).md");
-        await File.WriteAllTextAsync(nota1, "| Nome | Relacao |\n| Maria | Namorada |");
-        await File.WriteAllTextAsync(nota2, "| Nome | Relacao |\n| Felipe | Amigo |");
+        await File.WriteAllTextAsync(nota1, "| Nome | Relacao |\n| Sicrana | Namorada |");
+        await File.WriteAllTextAsync(nota2, "| Nome | Relacao |\n| Fulano | Amigo |");
 
         var mockEmbedding = Substitute.For<IEmbeddingProvider>();
         mockEmbedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -895,7 +895,7 @@ public class VaultRagEngineTests : IDisposable
         _ = mockEmbedding.DidNotReceive().GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
 
         // E o conteudo de AMBAS chega para a IA, nao so o da primeira.
-        results.ShouldContain(r => r.Excerpt.Contains("Maria"));
-        results.ShouldContain(r => r.Excerpt.Contains("Felipe"));
+        results.ShouldContain(r => r.Excerpt.Contains("Sicrana"));
+        results.ShouldContain(r => r.Excerpt.Contains("Fulano"));
     }
 }

@@ -1,5 +1,5 @@
-﻿$apiKey = "$env:GEMINI_API_KEY"
-$vaultPath = "C:\Users\victo\Repos\Pessoal\Obsidian\Vault\TEST"
+$apiKey = "$env:GEMINI_API_KEY"
+$vaultPath = if ($env:SYNAPSE_VAULT_PATH) { $env:SYNAPSE_VAULT_PATH } else { "$env:USERPROFILE\Obsidian\Vault" }
 
 Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host " TESTE REAL DE PERGUNTA RAG AO COFRE" -ForegroundColor Green

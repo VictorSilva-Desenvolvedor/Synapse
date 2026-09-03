@@ -66,7 +66,7 @@ public sealed class SynapseActivityLoggerTests : IDisposable
 
         await logger.LogChatAsync(
             question: "Quem são meus amigos?",
-            answer: "Seu amigo é o [[Felipe]].",
+            answer: "Seu amigo é o [[Fulano]].",
             durationMs: 1450,
             status: "Success",
             notesConsulted: ["Lista de Amigos"],
@@ -77,14 +77,14 @@ public sealed class SynapseActivityLoggerTests : IDisposable
         var mdContent = await File.ReadAllTextAsync(visibleVaultMarkdown);
 
         mdContent.ShouldContain("Quem são meus amigos?");
-        mdContent.ShouldContain("Seu amigo é o [[Felipe]].");
+        mdContent.ShouldContain("Seu amigo é o [[Fulano]].");
         mdContent.ShouldContain("1450ms");
         mdContent.ShouldContain("✅ Sucesso");
 
         var logFile = Path.Combine(_tempLocalLogsDir, "synapse_activity.log");
         var logContent = await File.ReadAllTextAsync(logFile);
         logContent.ShouldContain("Q: \"Quem são meus amigos?\"");
-        logContent.ShouldContain("A: \"Seu amigo é o [[Felipe]].\"");
+        logContent.ShouldContain("A: \"Seu amigo é o [[Fulano]].\"");
         logContent.ShouldContain("[1450ms]");
     }
 
@@ -116,8 +116,9 @@ public sealed class SynapseActivityLoggerTests : IDisposable
     [Fact]
     public async Task LogLiveToUserVault_IfVaultExists_ShouldWriteRealMarkdownLog()
     {
-        var realVault = @"C:\Users\victo\Repos\Pessoal\Obsidian\Vault\TEST";
-        if (!Directory.Exists(realVault)) return;
+        // Opt-in: so roda se SYNAPSE_LIVE_VAULT_PATH apontar para um cofre real.
+        var realVault = Environment.GetEnvironmentVariable("SYNAPSE_LIVE_VAULT_PATH");
+        if (string.IsNullOrWhiteSpace(realVault) || !Directory.Exists(realVault)) return;
 
         var logger = SynapseActivityLogger.Instance;
         logger.SetVaultPath(realVault);
@@ -126,7 +127,7 @@ public sealed class SynapseActivityLoggerTests : IDisposable
         await logger.LogClickAsync("ChatVault", "BtnSend", "Pergunta: 'quem são meus amigos?'");
         await logger.LogChatAsync(
             "quem são meus amigos?",
-            "Com base nas notas do seu cofre, o amigo registrado é o [[Felipe]] na nota [[Lista de Amigos]].",
+            "Com base nas notas do seu cofre, o amigo registrado é o [[Fulano]] na nota [[Lista de Amigos]].",
             1280,
             "Success",
             ["Lista de Amigos"],

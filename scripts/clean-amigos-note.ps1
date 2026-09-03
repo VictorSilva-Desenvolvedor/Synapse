@@ -18,13 +18,14 @@ tags:
 
 | Nome | Relação | Observações / Detalhes |
 | :--- | :--- | :--- |
-| Felipe | Amigo | Contato adicionado inicial |
+| Fulano | Amigo | Contato adicionado inicial |
 
 ## Conexões
 - [[Pessoas]]
-- [[Felipe]]
+- [[Fulano]]
 "@
 
-$vaultPath = "C:\Users\victo\Repos\Pessoal\Obsidian\Vault\TEST\Pessoas\Lista de Amigos.md"
+$vaultRoot = if ($env:SYNAPSE_VAULT_PATH) { $env:SYNAPSE_VAULT_PATH } else { "$env:USERPROFILE\Obsidian\Vault" }
+$vaultPath = Join-Path $vaultRoot "Pessoas\Lista de Amigos.md"
 Set-Content -Path $vaultPath -Value $noteContent -Encoding UTF8
 Write-Host "Lista de Amigos.md regravada com sucesso e limpa!" -ForegroundColor Green

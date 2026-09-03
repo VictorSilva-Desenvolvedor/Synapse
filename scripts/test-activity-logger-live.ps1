@@ -1,10 +1,10 @@
-$vaultPath = "C:\Users\victo\Repos\Pessoal\Obsidian\Vault\TEST"
+$vaultPath = if ($env:SYNAPSE_VAULT_PATH) { $env:SYNAPSE_VAULT_PATH } else { "$env:USERPROFILE\Obsidian\Vault" }
 
 Write-Host "========================================="
 Write-Host " TESTE DO SISTEMA DE LOGS DO SYNAPSE"
 Write-Host "========================================="
 
-$coreDll = "C:\Users\victo\Repos\Pessoal\Synapse\Synapse\src\Synapse.Core\bin\Debug\net8.0\Synapse.Core.dll"
+$coreDll = Join-Path $PSScriptRoot "..\src\Synapse.Core\bin\Debug\net8.0\Synapse.Core.dll"
 Add-Type -Path $coreDll
 
 $logger = [Synapse.Core.Logging.SynapseActivityLogger]::Instance
@@ -17,7 +17,7 @@ $logger.LogClickAsync("ChatVault", "BtnSend", "Pergunta: quem sao meus amigos?")
 Write-Host "Registrando interacao de Chat / IA com tempo de resposta..."
 $logger.LogChatAsync(
     "quem sao meus amigos?",
-    "Com base nas notas do seu cofre, o amigo registrado e o [[Felipe]] na nota [[Lista de Amigos]].",
+    "Com base nas notas do seu cofre, o amigo registrado e o [[Fulano]] na nota [[Lista de Amigos]].",
     1280,
     "Success",
     @("Lista de Amigos"),

@@ -1,5 +1,5 @@
-﻿$apiKey = "$env:GEMINI_API_KEY"
-$vaultPath = "C:\Users\victo\Repos\Pessoal\Obsidian\Vault\TEST"
+$apiKey = "$env:GEMINI_API_KEY"
+$vaultPath = if ($env:SYNAPSE_VAULT_PATH) { $env:SYNAPSE_VAULT_PATH } else { "$env:USERPROFILE\Obsidian\Vault" }
 $userMessage = "ola tenho um amigo chamado felipe crie uma area para salvar meus amigos"
 
 $headers = @{ "Content-Type" = "application/json" }
@@ -16,7 +16,7 @@ Diretrizes de Tomada de Decisão:
    - Quando o usuário informar fatos, ideias, contatos, tarefas, amigos, reuniões, dados de projetos ou pedir para criar áreas/listas/tabelas (ex.: 'tenho um amigo chamado felipe', 'crie uma área para salvar meus amigos', 'adicione na lista X').
    - Decisões estruturais:
      * "category": escolha uma pasta semântica lógica ('Pessoas' para amigos/contatos/pessoas, 'Tarefas' para afazeres/prazos, 'Projetos' para iniciativas, 'Conceito' para definições, 'Ideias' para pensamentos rápidos). Se já existir uma pasta relevante ($categoryFoldersList), use-a.
-     * "title": título específico, conciso e elegante (ex.: 'Amigos', 'Lista de Amigos', 'Felipe', 'Planejamento Q4'). Nunca use títulos genéricos como 'Nova Anotação'.
+     * "title": título específico, conciso e elegante (ex.: 'Amigos', 'Lista de Amigos', 'Fulano', 'Planejamento Q4'). Nunca use títulos genéricos como 'Nova Anotação'.
      * "tags": tags relevantes sem '#' (ex.: ['pessoas', 'amigos', 'contatos']).
      * "bodyMarkdown": ESTRUTURA PROFISSIONAL EM MARKDOWN. Se for uma lista, área ou catálogo de informações, use tabelas Markdown elegantes (| Nome | Relação | Detalhes | Data |) e tópicos bem formatados. NUNCA inclua saudações ('Olá'), conversas, perguntas, meta-prompts ou repetições da instrução do usuário dentro do corpo da nota. Apenas os dados refinados e organizados.
      * "keyPoints": lista de pontos-chave sintetizados.
@@ -26,7 +26,7 @@ Diretrizes de Tomada de Decisão:
    - Quando a mensagem for estritamente uma pergunta ou busca sobre notas existentes no cofre. Responda em "replyMessage" de forma clara citando as notas com [[Nome da Nota]].
 
 3. CAMPO "replyMessage" (Resposta no chat):
-   - Se ShouldCapture=true: Explique de forma breve, elegante e prestativa a decisão tomada no cofre (ex.: 'Criei a área de Pessoas e adicionei o Felipe na sua lista de amigos com uma tabela estruturada.').
+   - Se ShouldCapture=true: Explique de forma breve, elegante e prestativa a decisão tomada no cofre (ex.: 'Criei a área de Pessoas e adicionei o Fulano na sua lista de amigos com uma tabela estruturada.').
    - Se apenas conversa/saudação: Responda amigavelmente sem capturar nada (ShouldCapture=false).
 
 Responda ESTRITAMENTE em formato JSON com o seguinte schema:

@@ -210,7 +210,7 @@ public sealed class SqliteVaultSearchIndexTests : IDisposable
         // que citam a pergunta inteira. Verificado no cofre real antes da correcao.
         await _index.IndexFileAsync(
             "Brain/Pessoas/Lista de Amigos.md",
-            "# Lista de Amigos\n\n| Nome | Contato |\n| Felipe | 9999 |");
+            "# Lista de Amigos\n\n| Nome | Contato |\n| Fulano | 9999 |");
         await _index.IndexFileAsync("Outra.md", "Nota sem relacao nenhuma com o assunto.");
 
         var encontrados = new List<VaultSearchResult>();

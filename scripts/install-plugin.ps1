@@ -1,5 +1,5 @@
 param (
-    [string]$VaultPath = "C:\Users\victo\Repos\Pessoal\Obsidian\Vault\TEST"
+    [string]$VaultPath = $(if ($env:SYNAPSE_VAULT_PATH) { $env:SYNAPSE_VAULT_PATH } else { "$env:USERPROFILE\Obsidian\Vault" })
 )
 
 $ErrorActionPreference = "Stop"

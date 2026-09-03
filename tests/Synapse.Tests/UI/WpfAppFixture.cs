@@ -46,9 +46,16 @@ public sealed class WpfAppFixture : IDisposable
         _uiThread.SetApartmentState(ApartmentState.STA);
         _uiThread.Start();
 
-        if (!_ready.Wait(TimeSpan.FromSeconds(10)))
+        // 60s, nao 10: subir a Application do WPF carrega tema e as fontes pixel, e no runner do
+        // CI (2 nucleos) isso disputa CPU com as outras colecoes que o xunit roda em paralelo. A
+        // thread STA fica sem fatia de tempo e nao sinaliza dentro de 10s - derrubando de uma vez
+        // as 19 suites de UI, todas com o mesmo erro de fixture. O trabalho e o mesmo; o que
+        // estoura e o tempo de parede, entao o limite so precisa ser generoso o bastante para nao
+        // transformar lentidao em falha. Na maquina de desenvolvimento sinaliza em milissegundos.
+        if (!_ready.Wait(TimeSpan.FromSeconds(60)))
         {
-            throw new InvalidOperationException("A thread STA de captura WPF nao inicializou.");
+            throw new InvalidOperationException(
+                "A thread STA de captura WPF nao inicializou em 60s.");
         }
     }
 

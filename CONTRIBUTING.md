@@ -37,20 +37,20 @@ Refs: US-SYNC.1 (RF-SYNC.1)
 
 - **Tipos aceitos:** `feat`, `fix`, `docs`, `test`, `refactor`, `chore`.
 - **Escopo:** o projeto/módulo afetado (`core`, `sync`, `conflict`, `rules`, `data`, `host`, `tray`, `brain`, `agent`, `remote`).
-- **Refs:** quando o commit implementa ou avança uma história do Backlog, referenciar o `US-x`/`TECH-x` (e o `RF-x` entre parênteses, se aplicável) — mantém o commit rastreável até a Visão de Produto, sem precisar abrir os documentos para saber por que aquele código existe.
+- **Refs:** quando o commit implementa ou avança uma história do Backlog, referenciar o `US-x`/`TECH-x` (e o `RF-x` entre parênteses, se aplicável) — mantém o commit rastreável até a motivação de produto, sem precisar sair do histórico para saber por que aquele código existe.
 - **Nunca** incluir trailer de coautoria (seção 2).
 - Commits pequenos e coesos são preferíveis, mas — diferente do fluxo antigo por PR — cada commit já vai para `main` como está, então cada um deve deixar o repositório num estado consistente (build e testes passando).
 
 ## 5. Checklist antes de cada commit
 
-Sem PR para servir de gate, o checklist da Definition of Done (`Backlog - Synapse.md`) é verificado **antes de commitar**, não depois:
+Sem PR para servir de gate, o checklist da Definition of Done abaixo é verificado **antes de commitar**, não depois:
 
 - [ ] Sem trecho placeholder/`TODO` pendente.
 - [ ] Teste unitário cobrindo toda lógica nova (quando aplicável).
 - [ ] Critério de aceite da história verificado.
-- [ ] `SRS`/`PRD`/`API` atualizados, se o comportamento especificado neles mudou.
+- [ ] Especificação interna atualizada, se o comportamento descrito nela mudou.
 - [ ] Build e testes passando localmente (`dotnet test`).
-- [ ] Nenhuma dependência nova adicionada sem passar pelo checklist de custo zero do **ADR-009** (`ADR - Synapse.md`) — gratuita, sem assinatura, sem cartão.
+- [ ] Nenhuma dependência nova adicionada sem passar pelo critério de custo zero — gratuita, sem assinatura, sem cartão.
 
 ## 6. Critérios para um commit ir para `main`
 
@@ -66,13 +66,13 @@ Como não há branch para descartar, um commit problemático é corrigido com um
 
 ## 8. Integração Contínua (CI)
 
-CI via **GitHub Actions**, dentro do plano gratuito (ver **ADR-011** em `ADR - Synapse.md`) — roda em todo push em `main`: restauração de pacotes, build da solution, execução de `Synapse.Tests`. Um push que deixa o CI vermelho exige correção imediata (seção 6.3), antes de qualquer outra mudança.
+CI via **GitHub Actions**, dentro do plano gratuito — roda em todo push em `main`: restauração de pacotes, build da solution, execução de `Synapse.Tests`. Um push que deixa o CI vermelho exige correção imediata (seção 6.3), antes de qualquer outra mudança.
 
 ## 9. Ambiente de desenvolvimento
 
-- .NET SDK — versão LTS mais recente disponível no início da implementação (ver `SRS - Synapse.md`, seção 2.4; a versão exata deve ser fixada em `global.json` assim que a implementação começar).
+- .NET SDK — a versão exata é fixada em `global.json`.
 - Rodar os testes localmente antes de cada commit: `dotnet test`.
-- Nenhuma ferramenta paga é necessária para desenvolver, testar ou rodar o Synapse — coerente com a regra permanente de custo zero (`ADR-009`).
+- Nenhuma ferramenta paga é necessária para desenvolver, testar ou rodar o Synapse — coerente com a regra permanente de custo zero.
 
 ## 10. Quando voltar a usar branches e Pull Requests
 

@@ -499,3 +499,21 @@ $RECYCLE.BIN/
 *.swp
 
 .claude/scheduled_tasks.lock
+
+# ---------------------------------------------------------------------------
+# Documentacao interna de engenharia e instrucoes de agente.
+# Descrevem o funcionamento interno do sistema, o backlog e as lacunas de
+# validacao ainda em aberto - ficam so na maquina, fora do repositorio publico.
+# Publicos permanecem apenas README.md, CONTRIBUTING.md e LICENSE.
+# ---------------------------------------------------------------------------
+/ADR - Synapse.md
+/API - Synapse.md
+/Backlog - Synapse.md
+/PRD - Synapse.md
+/SRS - Synapse.md
+/SAD - Synapse.md
+/Plano de Testes - Synapse.md
+/Visão de Produto - Synapse.md
+/Resumo do Sistema - Synapse.md
+/Pendencias - Synapse.md
+/.claude/

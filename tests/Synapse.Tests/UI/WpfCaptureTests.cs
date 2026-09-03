@@ -285,9 +285,9 @@ public sealed class WpfCaptureTests
             () => new OnboardingWindow(),
             "01_OnboardingWindow.png",
             window => ((OnboardingWindow)window).SetSampleData(
-                "VictorPauloDev",
-                "Synapse-Vault",
-                @"C:\Users\victo\Obsidian\Segundo Cerebro",
+                "seu-usuario",
+                "meu-cofre",
+                @"D:\Obsidian\Segundo Cerebro",
                 "Token valido e autenticado.",
                 tokenOk: true));
 
